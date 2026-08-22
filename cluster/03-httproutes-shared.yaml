@@ -19,8 +19,8 @@ spec:
     - name: studylife-gateway
       namespace: nginx-gateway
   hostnames:
-    - grafana.home.lan
-    - grafana.example.com
+    - grafana.heim.lan
+    - grafana.lukas2311-homelab.com
   rules:
     - backendRefs:
         - name: grafana
