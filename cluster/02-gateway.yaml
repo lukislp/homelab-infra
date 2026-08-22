@@ -63,6 +63,11 @@ metadata:
 spec:
   gatewayClassName: nginx
   infrastructure:
+    # Pins the generated LoadBalancer Service to the fixed IP DNS already points at, so it
+    # survives a MetalLB reload without depending on a manual, git-untracked annotation on the
+    # generated Service (see 00-metallb-config.yaml's incident note - the same class of bug).
+    annotations:
+      metallb.io/loadBalancerIPs: 192.168.20.241
     parametersRef:
       group: gateway.nginx.org
       kind: NginxProxy
