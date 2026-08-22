@@ -519,7 +519,7 @@ data:
               - refId: A
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: prometheus
-                model: { refId: A, expr: 'min(kube_deployment_status_replicas_available{namespace="studylife-scale",deployment="uptime-kuma"}) or vector(0)' }
+                model: { refId: A, expr: 'min(kube_deployment_status_replicas_available{namespace="monitoring",deployment="uptime-kuma"}) or vector(0)' }
               - refId: B
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: "__expr__"
