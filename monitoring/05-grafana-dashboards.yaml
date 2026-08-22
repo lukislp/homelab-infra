@@ -1,0 +1,515 @@
+# Grafana dashboard contents, deliberately SEPARATE from k8s/17-grafana.yaml (Deployment/
+# Service/Ingress/Datasource live there) - this file has no placeholders whatsoever (unlike the
+# ingress host in k8s/17-grafana.yaml), so it can safely be rolled out automatically as its own
+# Flux Kustomization scope (see k8s/flux/deploy/kustomization.yaml) without the problem that
+# k8s/04-web.yaml/05-worker.yaml had with their imagePullPolicy placeholder: a blind apply of
+# this file can't reset anything incorrectly, because nothing environment-specific lives here.
+#
+# ONE ConfigMap with multiple keys instead of one per dashboard, mounted as a WHOLE directory
+# (no subPath) into the Grafana deployment - a NEW dashboard therefore only needs a new key here,
+# no more changes to k8s/17-grafana.yaml (Deployment/volumeMounts) required. From now on, every
+# future dashboard change/addition just needs a normal commit; Flux rolls it out automatically,
+# with no manual bootstrap-cluster.ps1 run needed (which would be risky anyway because of the
+# ingress placeholder in k8s/17-grafana.yaml, see the comment there).
+#
+# All panel queries deliberately reuse ONLY metric names already verified live (no newly
+# invented metrics that could show "No Data" due to exporter/version discrepancies) - exception:
+# "up{job=...}" (a core Prometheus metric, guaranteed to exist for every scrape target) and
+# "kube_deployment_status_replicas_available"/"node_memory_MemTotal_bytes" (standard metrics
+# from kube-state-metrics/node-exporter, the exact counterparts to the already-used
+# "kube_pod_info"/"node_memory_MemAvailable_bytes").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: monitoring
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: studylife
+        folder: StudyLife
+        type: file
+        options:
+          path: /etc/grafana/provisioning/dashboard-json/core
+      - name: studylife-community
+        folder: StudyLife (Community)
+        type: file
+        options:
+          path: /etc/grafana/provisioning/dashboard-json/community
+      # Own folder/provider/ConfigMap, deliberately NOT filed under the "StudyLife" folder
+      # above - studylife-ai is a separate service with its own repo/release cycle, so its
+      # dashboard(s) get their own group instead of being mixed into the main platform's.
+      - name: studylife-ai
+        folder: StudyLife AI
+        type: file
+        options:
+          path: /etc/grafana/provisioning/dashboard-json/studylife-ai
+      # Same reasoning as studylife-ai above - studylife-mcp is its own separate repo/release
+      # cycle too.
+      - name: studylife-mcp
+        folder: StudyLife MCP
+        type: file
+        options:
+          path: /etc/grafana/provisioning/dashboard-json/studylife-mcp
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-core
+  namespace: monitoring
+data:
+  # New: "Is everything OK?" at a glance, without having to read PromQL - large stat panels with
+  # color thresholds (green/red) instead of raw numbers/time series. Use the 5 subject-specific
+  # dashboards below for deeper digging.
+  overview.json: |
+    {
+      "title": "Überblick",
+      "uid": "studylife-overview",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "description": "Ampel-Ansicht für den ganzen Cluster - grün heißt ok, rot heißt hinschauen.",
+      "panels": [
+        { "id": 1, "title": "Web-App erreichbar", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 0, "y": 0 },
+          "description": "Anzahl bereiter studylife-web-Pods. 0 = App nicht erreichbar.",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "min(kube_deployment_status_replicas_available{namespace=\"studylife-scale\",deployment=\"studylife-web\"})", "refId": "A" }] },
+        { "id": 2, "title": "Worker aktiv", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 4, "y": 0 },
+          "description": "Anzahl bereiter studylife-worker-Pods (Reminder/Report-Tick).",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "min(kube_deployment_status_replicas_available{namespace=\"studylife-scale\",deployment=\"studylife-worker\"})", "refId": "A" }] },
+        { "id": 3, "title": "Datenbank-Instanzen online", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 8, "y": 0 },
+          "description": "Von 3 CloudNativePG-Instanzen (1 Primary + 2 Standby) online.",
+          "fieldConfig": { "defaults": { "max": 3, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "yellow", "value": 2 }, { "color": "green", "value": 3 } ] } } },
+          "targets": [{ "expr": "count(up{job=\"cnpg\"} == 1)", "refId": "A" }] },
+        { "id": 4, "title": "Redis-Knoten online", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 12, "y": 0 },
+          "description": "Von 6 Redis-Cluster-Pods (3 Master + 3 Replica) online.",
+          "fieldConfig": { "defaults": { "max": 6, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "yellow", "value": 5 }, { "color": "green", "value": 6 } ] } } },
+          "targets": [{ "expr": "count(up{job=\"redis\"} == 1)", "refId": "A" }] },
+        { "id": 5, "title": "Gateway-Datenebene online", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 16, "y": 0 },
+          "description": "Von 2 NGINX-Gateway-Fabric-Datenebenen-Replicas online (Nachfolger von ingress-nginx, s. k8s/07c-gateway.yaml).",
+          "fieldConfig": { "defaults": { "max": 2, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "yellow", "value": 1 }, { "color": "green", "value": 2 } ] } } },
+          "targets": [{ "expr": "count(up{job=\"nginx-gateway-fabric\",component=\"studylife-gateway-nginx\"} == 1)", "refId": "A" }] },
+        { "id": 6, "title": "Letztes DB-Backup", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 20, "y": 0 },
+          "description": "Zeitpunkt des letzten erfolgreichen CloudNativePG-Backups nach R2 (falls aktiviert).",
+          "fieldConfig": { "defaults": { "unit": "dateTimeAsIso" } },
+          "targets": [{ "expr": "cnpg_collector_last_available_backup_timestamp * 1000", "refId": "A" }] },
+        { "id": 7, "title": "CPU-Auslastung (Cluster-Durchschnitt)", "type": "gauge", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
+          "description": "Über alle Nodes gemittelt. Ab hier lohnt ein Blick ins Cluster-Übersicht-Dashboard.",
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "red", "value": 0.85 } ] } } },
+          "targets": [{ "expr": "avg(1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))", "refId": "A" }] },
+        { "id": 8, "title": "Speicher belegt (Cluster-Durchschnitt)", "type": "gauge", "gridPos": { "h": 8, "w": 8, "x": 8, "y": 6 },
+          "description": "Über alle Nodes gemittelt.",
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "red", "value": 0.85 } ] } } },
+          "targets": [{ "expr": "avg(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))", "refId": "A" }] },
+        { "id": 9, "title": "Pod-Neustarts (24h, App-Namespace)", "type": "stat", "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
+          "description": "Ungeplante Neustarts der letzten 24h - vereinzelt normal (Rolling Updates), viele auf einmal sind ein Warnsignal.",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "red", "value": 8 } ] } } },
+          "targets": [{ "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"studylife-scale\"}[24h]))", "refId": "A" }] },
+        { "id": 10, "title": "Aktive Verbindungen (Gateway)", "type": "stat", "gridPos": { "h": 6, "w": 8, "x": 0, "y": 14 },
+          "description": "NGF exportiert wie ingress-nginx keine Latenz-/Status-Code-Metriken (live geprüft) - Verbindungszustände sind der nächstbeste Live-Indikator.",
+          "targets": [{ "expr": "sum(nginx_http_connection_count_connections{job=\"nginx-gateway-fabric\",nginx_connections_outcome=\"ACTIVE\"})", "refId": "A" }] },
+        { "id": 11, "title": "Requests/Sekunde (gesamt, ohne Status-Code-Aufschlüsselung)", "type": "stat", "gridPos": { "h": 6, "w": 8, "x": 8, "y": 14 },
+          "targets": [{ "expr": "sum(rate(nginx_http_requests_total{job=\"nginx-gateway-fabric\"}[5m]))", "refId": "A" }] },
+        { "id": 12, "title": "DB-Replikationsverzögerung (schlechtester Standby)", "type": "stat", "gridPos": { "h": 6, "w": 8, "x": 16, "y": 14 },
+          "description": "Wie weit ein Standby dem Primary hinterherhängt - im Failover-Fall potenziell verlorene Daten.",
+          "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] } } },
+          "targets": [{ "expr": "max(cnpg_pg_stat_replication_replay_lag_seconds)", "refId": "A" }] }
+      ]
+    }
+  cnpg.json: |
+    {
+      "title": "CloudNativePG",
+      "uid": "studylife-cnpg",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        { "id": 1, "title": "Replikations-Lag pro Standby", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "description": "Wie weit jeder Standby dem Primary hinterherhängt.",
+          "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] } } },
+          "targets": [{ "expr": "cnpg_pg_stat_replication_replay_lag_seconds", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 2, "title": "Aktive Verbindungen", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [{ "expr": "cnpg_backends_total", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 3, "title": "WAL-Schreibrate", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "description": "Wie viele Änderungsdaten pro Sekunde geschrieben werden - Grundlage für Backup/Replikation.",
+          "fieldConfig": { "defaults": { "unit": "Bps" } },
+          "targets": [{ "expr": "rate(cnpg_collector_wal_bytes[5m])", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 4, "title": "Streaming-Replicas", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+          "description": "Sollwert: 2 (Primary hat 2 angeschlossene Standbys).",
+          "fieldConfig": { "defaults": { "max": 2, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "yellow", "value": 1 }, { "color": "green", "value": 2 } ] } } },
+          "targets": [{ "expr": "cnpg_pg_replication_streaming_replicas", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 5, "title": "Letztes verfügbares Backup", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+          "fieldConfig": { "defaults": { "unit": "dateTimeAsIso" } },
+          "targets": [{ "expr": "cnpg_collector_last_available_backup_timestamp * 1000", "refId": "A" }] }
+      ]
+    }
+  cluster.json: |
+    {
+      "title": "Cluster-Übersicht",
+      "uid": "studylife-cluster",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        { "id": 1, "title": "CPU-Auslastung pro Node", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+          "targets": [{ "expr": "1 - avg by (node) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))", "legendFormat": "{{node}}", "refId": "A" }] },
+        { "id": 2, "title": "Speicher belegt pro Node", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "description": "Als Anteil statt Rohbytes - direkt vergleichbar zwischen den unterschiedlich großen Nodes (pinode01 4GB, pinode02 8GB).",
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+          "targets": [{ "expr": "1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)", "legendFormat": "{{node}}", "refId": "A" }] },
+        { "id": 3, "title": "Pod-Restarts (letzte 24h)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [{ "expr": "increase(kube_pod_container_status_restarts_total{namespace=\"studylife-scale\"}[24h])", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 4, "title": "Pod-Verteilung über Nodes (beweist Anti-Affinity)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [{ "expr": "kube_pod_info{namespace=\"studylife-scale\"}", "format": "table", "instant": true, "refId": "A" }] }
+      ]
+    }
+  redis.json: |
+    {
+      "title": "Redis Cluster",
+      "uid": "studylife-redis",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        { "id": 1, "title": "Speicherverbrauch pro Knoten", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "description": "maxmemory-Limit liegt bei 96 MB pro Knoten (allkeys-lru).",
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [{ "expr": "redis_memory_used_bytes", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 2, "title": "Hit/Miss-Ratio", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "description": "Anteil der Cache-Zugriffe, die im Cache gefunden wurden - niedrig ist nicht falsch, aber weniger effizient.",
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+          "targets": [{ "expr": "rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 3, "title": "Evictions (allkeys-lru greift?)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "description": "Wie oft Cache-Einträge unter Speicherdruck verdrängt wurden - unproblematisch bei reinem Cache (siehe RedisVersionCounter).",
+          "targets": [{ "expr": "rate(redis_evicted_keys_total[5m])", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 4, "title": "Replikations-Offset (Master vs. Replica)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "description": "Master und zugehörige Replica sollten nahe beieinander liegen - große Lücken deuten auf Replikationsverzug hin.",
+          "targets": [
+            { "expr": "redis_master_repl_offset", "legendFormat": "master {{pod}}", "refId": "A" },
+            { "expr": "redis_slave_repl_offset", "legendFormat": "replica {{pod}}", "refId": "B" }
+          ] }
+      ]
+    }
+  ingress.json: |
+    {
+      "title": "NGINX Gateway Fabric",
+      "uid": "studylife-ingress",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "description": "Gateway-API-Nachfolger von ingress-nginx (s. k8s/07c-gateway.yaml). uid bewusst beibehalten, damit bestehende Links/Verweise weiter funktionieren.",
+      "panels": [
+        { "id": 1, "title": "Requests/Sekunde pro Datenebenen-Pod", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "description": "Wie schon bei ingress-nginx: keine Status-Code-/Latenz-/Per-Route-Aufschlüsselung verfügbar (nginx_http_requests_total ist die einzige Request-Metrik der NGF-Datenebene, live geprüft).",
+          "targets": [{ "expr": "sum by (pod) (rate(nginx_http_requests_total{job=\"nginx-gateway-fabric\"}[5m]))", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 2, "title": "Verbindungszustände (aktiv/lesend/schreibend/wartend)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "description": "Kein Latenz-Histogramm verfügbar - Verbindungszustände sind der nächstbeste Indikator für Last/Stau (dieselbe Einschränkung wie bei ingress-nginx).",
+          "targets": [{ "expr": "sum by (nginx_connections_outcome) (nginx_http_connection_count_connections{job=\"nginx-gateway-fabric\"})", "legendFormat": "{{nginx_connections_outcome}}", "refId": "A" }] },
+        { "id": 3, "title": "Control-Plane online", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
+          "description": "Der NGF-Control-Plane-Pod (nginx-gateway) übersetzt Gateway-/HTTPRoute-Objekte in NGINX-Konfiguration - ohne ihn läuft die Datenebene mit der letzten bekannten Konfiguration weiter, nimmt aber keine Änderungen mehr an. Ersetzt das frühere Config-Reload-Panel (nginx_ingress_controller_config_last_reload_successful hat kein NGF-Gegenstück, live geprüft).",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "count(up{job=\"nginx-gateway-fabric\",component=\"nginx-gateway\"} == 1) or vector(0)", "refId": "A" }] },
+        { "id": 4, "title": "Verarbeitete Konfigurations-Event-Batches/s", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
+          "description": "Rate, mit der der Control-Plane Gateway-/Route-Änderungen in NGINX-Konfiguration umsetzt - 0 im Ruhezustand ist normal, dauerhaft hohe Werte deuten auf Reconcile-Schleifen hin. Bewusst die _count-Rate statt histogram_quantile auf den _bucket-Serien: die p95-Query liefert im (üblichen) Ruhezustand NaN/No Data, live geprüft.",
+          "targets": [{ "expr": "sum(rate(nginx_gateway_fabric_event_batch_processing_milliseconds_count[5m]))", "refId": "A" }] },
+        { "id": 5, "title": "Angenommen vs. tatsächlich verarbeitet (accepted vs. handled)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "description": "Sollten praktisch identisch sein - eine dauerhafte Lücke würde auf verworfene Verbindungen hindeuten (gleiche Interpretation wie im NPM-Dashboard).",
+          "targets": [{ "expr": "sum by (nginx_connections_outcome, pod) (nginx_http_connections_total{job=\"nginx-gateway-fabric\"})", "legendFormat": "{{nginx_connections_outcome}} {{pod}}", "refId": "A" }] },
+        { "id": 6, "title": "Reconcile-Fehler pro Controller (5m-Rate)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "description": "Der Control-Plane besteht aus ~30 einzelnen Controllern (einer je Gateway-API-/Policy-Ressourcentyp, z.B. gateway, httproute, backendtlspolicy, ratelimitpolicy - live per controller_runtime_reconcile_total geprüft). Dauerhaft > 0 auf einem Controller heißt: Änderungen an genau dieser Ressourcenart werden nicht mehr sauber in NGINX-Konfiguration übersetzt.",
+          "targets": [{ "expr": "sum by (controller) (rate(controller_runtime_reconcile_total{job=\"nginx-gateway-fabric\",result=\"error\"}[5m]))", "legendFormat": "{{controller}}", "refId": "A" }] },
+        { "id": 7, "title": "Workqueue-Tiefe pro Controller", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "description": "Anzahl noch nicht abgearbeiteter Reconcile-Aufträge je Controller - im Ruhezustand 0, dauerhaft wachsend deutet auf einen überlasteten oder hängenden Controller hin (gleiche Kategorie Frühwarnsignal wie die Redis-Queue-Länge im Worker-Dashboard).",
+          "targets": [{ "expr": "sum by (name) (workqueue_depth{job=\"nginx-gateway-fabric\"})", "legendFormat": "{{name}}", "refId": "A" }] }
+      ]
+    }
+  worker.json: |
+    {
+      "title": "Worker-Shard-Zuordnung",
+      "uid": "studylife-worker-shards",
+      "schemaVersion": 39,
+      "time": { "from": "now-1h", "to": "now" },
+      "description": "Zeigt, welche Worker-Instanz gerade welchen Shard hält (RedisWorkerShardClaim.cs, worker:shard:N-Keys über redis_exporter --check-keys exportiert, ohne App-Code-Änderung).",
+      "panels": [
+        { "id": 1, "title": "Belegte Shards + haltende Instanz-Id", "type": "table", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "targets": [{ "expr": "redis_key_value_as_string{key=~\"worker:shard:.*\"}", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 2, "title": "Anzahl aktuell belegter Shards (erwartet: Worker__ReplicaCount)", "type": "stat", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+          "targets": [{ "expr": "count(count by (key) (redis_key_size{key=~\"worker:shard:.*\"}))", "refId": "A" }] }
+      ]
+    }
+  npm.json: |
+    {
+      "title": "Nginx Proxy Manager (extern)",
+      "uid": "studylife-npm",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "description": "Der externe HA-Reverse-Proxy (NPM + Keepalived) auf den Pis, AUSSERHALB des K8s-Clusters - nur Basis-Metriken über stub_status (keine Latenz-/Status-Code-Aufschlüsselung, dieselbe Einschränkung wie ingress-nginx).",
+      "panels": [
+        { "id": 1, "title": "NPM erreichbar (pro Pi)", "type": "stat", "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+          "description": "1 = Exporter konnte NPMs stub_status erfolgreich abfragen.",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "nginx_up", "legendFormat": "{{pi}}", "refId": "A" }] },
+        { "id": 2, "title": "Aktive Verbindungen pro Pi", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 8, "y": 0 },
+          "description": "Nur der Pi mit der aktuellen Keepalived-VIP zeigt echten Traffic - der Backup-Pi liegt bei 0, solange kein Failover aktiv ist.",
+          "targets": [{ "expr": "nginx_connections_active", "legendFormat": "{{pi}}", "refId": "A" }] },
+        { "id": 3, "title": "Lesende/Schreibende/Wartende Verbindungen", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "targets": [
+            { "expr": "nginx_connections_reading", "legendFormat": "lesend {{pi}}", "refId": "A" },
+            { "expr": "nginx_connections_writing", "legendFormat": "schreibend {{pi}}", "refId": "B" },
+            { "expr": "nginx_connections_waiting", "legendFormat": "wartend {{pi}}", "refId": "C" }
+          ] },
+        { "id": 4, "title": "Requests/Sekunde pro Pi", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "description": "job-Filter noetig, seit die NGF-Datenebene (nginx-gateway-fabric-Job) denselben Metriknamen exportiert.",
+          "targets": [{ "expr": "rate(nginx_http_requests_total{job=\"npm\"}[5m])", "legendFormat": "{{pi}}", "refId": "A" }] },
+        { "id": 5, "title": "Angenommen vs. tatsächlich verarbeitet (accepted vs. handled)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "description": "Sollten praktisch identisch sein - eine dauerhafte Lücke würde auf verworfene Verbindungen hindeuten (z.B. worker_connections-Limit erreicht).",
+          "targets": [
+            { "expr": "nginx_connections_accepted", "legendFormat": "accepted {{pi}}", "refId": "A" },
+            { "expr": "nginx_connections_handled", "legendFormat": "handled {{pi}}", "refId": "B" }
+          ] }
+      ]
+    }
+  logs.json: |
+    {
+      "title": "Kubernetes Logs",
+      "uid": "studylife-logs",
+      "schemaVersion": 39,
+      "time": { "from": "now-1h", "to": "now" },
+      "description": "Aggregierte Logs aller Pods (Loki/Promtail, k8s/18-loki.yaml, k8s/19-promtail.yaml) - Aufschlüsselung nach Level/Namespace/Pod statt nur der rohen Explore-Ansicht (ein Chart + eine Logliste). Filterbar über die Variablen oben (Namespace/Pod/Container/Level/Freitext). Simple Ad-hoc-Suche weiterhin über Explore -> Loki möglich; für einen kuratierten, vendorten Basis-Blick siehe zusätzlich 'Loki Kubernetes Logs' im Ordner 'StudyLife (Community)' (k8s/17c-grafana-community-dashboards.yaml, ID 15141).",
+      "templating": {
+        "list": [
+          { "name": "search", "type": "textbox", "label": "Freitext-Suche", "description": "Teilstring-Suche im Lognachrichtentext (LogQL |=).", "query": "", "current": { "text": "", "value": "" } },
+          { "name": "namespace", "type": "query", "label": "Namespace", "datasource": { "type": "loki", "uid": "loki" }, "definition": "label_values(namespace)", "query": "label_values(namespace)", "multi": true, "includeAll": true, "allValue": ".+", "refresh": 1, "sort": 1, "current": {} },
+          { "name": "pod", "type": "query", "label": "Pod", "datasource": { "type": "loki", "uid": "loki" }, "definition": "label_values({namespace=~\"$namespace\"}, pod)", "query": "label_values({namespace=~\"$namespace\"}, pod)", "multi": true, "includeAll": true, "allValue": ".+", "refresh": 1, "sort": 1, "current": {} },
+          { "name": "container", "type": "query", "label": "Container", "datasource": { "type": "loki", "uid": "loki" }, "definition": "label_values({namespace=~\"$namespace\"}, container)", "query": "label_values({namespace=~\"$namespace\"}, container)", "multi": true, "includeAll": true, "allValue": ".+", "refresh": 1, "sort": 1, "current": {} },
+          { "name": "level", "type": "custom", "label": "Level", "query": "critical,error,warn,info,debug,trace,unknown", "multi": true, "includeAll": true, "allValue": ".+", "current": {} }
+        ]
+      },
+      "panels": [
+        { "id": 1, "title": "Log-Zeilen gesamt (Zeitraum)", "type": "stat", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "targets": [{ "expr": "sum(count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" | detected_level=~\"$level\" [$__range]))", "refId": "A" }] },
+        { "id": 2, "title": "Fehler (Zeitraum)", "type": "stat", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "description": "detected_level=\"error\" - Loki's eingebaute automatische Level-Erkennung (kein eigenes Log-Parsing in Promtail nötig). Ausgeschlossen: redis_exporter MOVED (normale Cluster-Redirects), NGF \"context canceled\" (interne gRPC-Reconnects Control-/Data-Plane), \"wrong version number\" (Nicht-TLS-Probes/Portscans gegen den TLS-Port) und Lokis eigene interne Querier<->Scheduler-Kommunikation (\"error notifying scheduler about finished query\"/\"error processing requests from scheduler\" - normales Single-Binary-Rauschen bei jeder Query, wird bei offenem Dashboard mit kurzem Poll-Intervall sichtbar haeufiger). NICHT ausgeschlossen: \"Connection refused\"-Fehler beim Erreichen eines Upstreams - das ist ein echtes Signal (z.B. waehrend eines Backend-Neustarts).",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+          "targets": [{ "expr": "sum(count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" != \"MOVED\" != \"context canceled\" != \"wrong version number\" != \"notifying scheduler about finished query\" != \"processing requests from scheduler\" | detected_level=\"error\" [$__range])) or vector(0)", "refId": "A" }] },
+        { "id": 3, "title": "Warnungen (Zeitraum)", "type": "stat", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+          "description": "CoreDNS' \"No files matching import glob pattern\" (erwartet, keine Custom-Overrides vorhanden), NGF's \"Currently error log outputs to stderr\"/\"NGINX Plus API is not configured\"/\"context canceled\" (interne gRPC-Reconnects) und studylife-web/-worker's \"Binding to endpoints defined via IConfiguration\" (Kestrel[0] - architekturbedingt durch den expliziten ConfigureKestrel-Listen()-Block fuer den WebBackendTls-TLS-Hop, kein Bug, siehe Program.cs) ausgeschlossen - sonst reines Infra-Rauschen statt eines Signals.",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 } ] } } },
+          "targets": [{ "expr": "sum(count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" != \"No files matching import glob pattern\" != \"Currently error log outputs to stderr\" != \"NGINX Plus API is not configured\" != \"context canceled\" != \"Binding to endpoints defined via IConfiguration\" | detected_level=\"warn\" [$__range])) or vector(0)", "refId": "A" }] },
+        { "id": 4, "title": "Pods mit Logs im Zeitraum", "type": "stat", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "targets": [{ "expr": "count(count by (pod) (count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" [$__range])))", "refId": "A" }] },
+        { "id": 5, "title": "Log-Volumen nach Level", "type": "timeseries", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "description": "Woher die \"0\"/\"1.04\"-Verwirrung bei rate()/increase() kommt (docs/decisions.md) gilt hier genauso - count_over_time pro Balken ist ein absoluter Zeilenwert, kein Rate, also leichter zu lesen. Bekanntes Infra-Rauschen ausgeschlossen (redis_exporter MOVED, CoreDNS/NGF-Warnungen ohne Custom-Config bzw. NGINX-Plus-Lizenz, NGF-interne gRPC-Reconnects, TLS-Portscans, studylife's architekturbedingtes Kestrel-Binding-Log, Lokis eigenes Querier<->Scheduler-Rauschen) - \"Connection refused\" gegen einen Upstream bleibt bewusst drin, das ist ein echtes Signal.",
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "drawStyle": "bars" } } },
+          "targets": [{ "expr": "sum by (detected_level) (count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" != \"MOVED\" != \"No files matching import glob pattern\" != \"Currently error log outputs to stderr\" != \"NGINX Plus API is not configured\" != \"context canceled\" != \"wrong version number\" != \"Binding to endpoints defined via IConfiguration\" != \"notifying scheduler about finished query\" != \"processing requests from scheduler\" [$__interval]))", "legendFormat": "{{detected_level}}", "refId": "A" }] },
+        { "id": 6, "title": "Log-Volumen nach Namespace", "type": "timeseries", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "drawStyle": "bars" } } },
+          "targets": [{ "expr": "sum by (namespace) (count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" [$__interval]))", "legendFormat": "{{namespace}}", "refId": "A" }] },
+        { "id": 7, "title": "Lauteste Pods (Top 10, Zeitraum)", "type": "table", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "targets": [{ "expr": "topk(10, sum by (pod) (count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" [$__range])))", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 8, "title": "Lauteste Container (Top 10, Zeitraum)", "type": "table", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "targets": [{ "expr": "topk(10, sum by (container) (count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" [$__range])))", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 9, "title": "Nur Fehler & Warnungen", "type": "logs", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 10, "w": 24, "x": 0, "y": 22 },
+          "description": "Dieselbe Selektion wie unten, zusätzlich auf detected_level=error|warn|critical eingeschränkt - für schnelles Überfliegen ohne im vollen Stream zu scrollen. Bekanntes Infra-Rauschen ausgeschlossen (redis_exporter MOVED, CoreDNS/NGF-Config-Hinweise, NGF-gRPC-Reconnects, TLS-Portscans, studylife's architekturbedingtes Kestrel-Binding-Log, Lokis eigenes Querier<->Scheduler-Rauschen) - \"Connection refused\" bleibt bewusst sichtbar, das ist ein echtes Signal (z.B. waehrend eines Backend-Neustarts).",
+          "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none" },
+          "targets": [{ "expr": "{namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" != \"MOVED\" != \"No files matching import glob pattern\" != \"Currently error log outputs to stderr\" != \"NGINX Plus API is not configured\" != \"context canceled\" != \"wrong version number\" != \"Binding to endpoints defined via IConfiguration\" != \"notifying scheduler about finished query\" != \"processing requests from scheduler\" | detected_level=~\"error|warn|critical\"", "refId": "A" }] },
+        { "id": 10, "title": "Alle Logs", "type": "logs", "datasource": { "type": "loki", "uid": "loki" }, "gridPos": { "h": 20, "w": 24, "x": 0, "y": 32 },
+          "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none" },
+          "targets": [{ "expr": "{namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |= \"$search\" | detected_level=~\"$level\"", "refId": "A" }] },
+        { "id": 11, "title": "Log-Pipeline: Loki erreichbar", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 0, "y": 52 },
+          "description": "Eigene Gesundheit der Log-Pipeline (Prometheus-Metriken, nicht Loki-Inhalt) - separater Belang von den App-Logs oben. count(up{job=\"loki\"}==1).",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "count(up{job=\"loki\"} == 1) or vector(0)", "refId": "A" }] },
+        { "id": 12, "title": "Log-Pipeline: Promtail-Pods aktiv (von 2 Nodes)", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 6, "y": 52 },
+          "fieldConfig": { "defaults": { "max": 2, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "yellow", "value": 1 }, { "color": "green", "value": 2 } ] } } },
+          "targets": [{ "expr": "count(up{job=\"promtail\"} == 1) or vector(0)", "refId": "A" }] },
+        { "id": 13, "title": "Log-Pipeline: verworfene Zeilen nach Grund", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 58 },
+          "description": "Sollte dauerhaft bei 0 liegen - reason=\"ingester_error\" war beim ersten echten Deploy die fehlende allow-ingress-to-loki-NetworkPolicy (docs/decisions.md).",
+          "targets": [{ "expr": "sum by (reason) (rate(promtail_dropped_entries_total[5m]))", "legendFormat": "{{reason}}", "refId": "A" }] },
+        { "id": 14, "title": "Log-Pipeline: gesendete Zeilen/Sekunde", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 58 },
+          "description": "0 über längere Zeit bei sonst aktivem Cluster ist verdächtig - war das Symptom des kubernetes_sd_configs-Bugs (promtail_targets_active_total blieb 0), s. docs/decisions.md.",
+          "targets": [{ "expr": "sum(rate(promtail_sent_entries_total[5m]))", "refId": "A" }] }
+      ]
+    }
+  monitoring-stack.json: |
+    {
+      "title": "Monitoring-Stack (Prometheus/Grafana/CoreDNS/MetalLB/Flux)",
+      "uid": "studylife-monitoring-stack",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "description": "Überwacht die Überwachung selbst - keine gute Community-Dashboard-Option für Prometheus/Grafana-Eigenmonitoring gefunden (ID 3662 nutzt veraltete graph/singlestat-Panel-Typen), deshalb klein selbst gebaut.",
+      "panels": [
+        { "id": 1, "title": "Scrape-Targets down (0 = alles ok)", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+          "targets": [{ "expr": "sum(up == 0) or vector(0)", "refId": "A" }] },
+        { "id": 2, "title": "Aktive Zeitreihen (TSDB)", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "targets": [{ "expr": "prometheus_tsdb_head_series", "refId": "A" }] },
+        { "id": 3, "title": "WAL-Größe", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [{ "expr": "prometheus_tsdb_wal_storage_size_bytes", "refId": "A" }] },
+        { "id": 4, "title": "Grafana-Dashboards gesamt", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "targets": [{ "expr": "grafana_stat_totals_dashboard", "refId": "A" }] },
+        { "id": 5, "title": "Scrape-Targets pro Job", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "targets": [{ "expr": "up", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 6, "title": "WAL-Schreibfehler (sollte immer 0 sein)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "targets": [{ "expr": "prometheus_tsdb_wal_writes_failed_total", "refId": "A" }] },
+        { "id": 7, "title": "Flux-Reconcile-Fehler pro Controller", "type": "timeseries", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+          "description": "Sollte dauerhaft bei 0 liegen - Anstiege zeigen, welcher Flux-Controller gerade Probleme hat (z.B. Git-Push abgelehnt, Registry nicht erreichbar).",
+          "targets": [{ "expr": "sum(rate(controller_runtime_reconcile_total{result=\"error\"}[5m])) by (controller)", "legendFormat": "{{controller}}", "refId": "A" }] }
+      ]
+    }
+---
+# Separate ConfigMap (own folder, see the provider entry above) - studylife-ai's own metrics
+# (llm/metrics.py: cost/latency/tokens per call_site+model+user_id, plus the FastAPI HTTP
+# auto-instrumentation) need the "job=studylife-ai" scrape job in k8s/14-prometheus.yaml to
+# exist first, added in the same commit as this file. Metric/label names were verified
+# locally against a running instance's real /metrics output before writing these queries
+# (not guessed) - but unlike the dashboards above, NOT yet verified against a real live scrape
+# from this cluster, since the job didn't exist before this commit. Worth a spot-check in
+# Grafana after the first real scrape interval.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-studylife-ai
+  namespace: monitoring
+data:
+  studylife-ai.json: |
+    {
+      "title": "StudyLife AI",
+      "uid": "studylife-ai-overview",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "description": "Kosten, Latenz und Volumen jedes LLM-Calls (RAG-Chat, Agent, Reranking, Retrieval, Ingestion, Eval) - aufschlüsselbar nach Nutzer, Aufrufstelle (call_site) und Modell. Quelle: llm/metrics.py (Prometheus-Metriken neben den strukturierten Logzeilen in llm/logging.py) plus HTTP-Auto-Instrumentierung.",
+      "panels": [
+        { "id": 1, "title": "Service erreichbar", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "description": "Anzahl bereiter studylife-ai-Pods, von Prometheus selbst über den Scrape-Erfolg gemessen (up-Metrik) - 0 heißt der Service antwortet nicht auf /metrics.",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "count(up{job=\"studylife-ai\"} == 1) or vector(0)", "refId": "A" }] },
+        { "id": 2, "title": "Kosten/Stunde (aktuell)", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "description": "Hochgerechnet aus der Kostenrate der letzten 5 Minuten.",
+          "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4 } },
+          "targets": [{ "expr": "sum(rate(studylife_ai_llm_cost_usd_total[5m])) * 3600", "refId": "A" }] },
+        { "id": 3, "title": "Kosten letzte 24h", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4 } },
+          "targets": [{ "expr": "sum(increase(studylife_ai_llm_cost_usd_total[24h]))", "refId": "A" }] },
+        { "id": 4, "title": "Fehlerrate (HTTP 5xx)", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.05 } ] } } },
+          "targets": [{ "expr": "sum(rate(http_requests_total{job=\"studylife-ai\",status=\"5xx\"}[5m])) / sum(rate(http_requests_total{job=\"studylife-ai\"}[5m])) or vector(0)", "refId": "A" }] },
+        { "id": 5, "title": "Requests/Sekunde nach Endpoint", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "targets": [{ "expr": "sum by (handler) (rate(http_requests_total{job=\"studylife-ai\"}[5m]))", "legendFormat": "{{handler}}", "refId": "A" }] },
+        { "id": 6, "title": "HTTP-Latenz p95 nach Endpoint", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (handler, le) (rate(http_request_duration_seconds_bucket{job=\"studylife-ai\"}[5m])))", "legendFormat": "{{handler}}", "refId": "A" }] },
+        { "id": 7, "title": "Kosten nach Nutzer (pro Stunde)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "description": "sum by (user_id) - beantwortet direkt \"wer hat wie viel verursacht\". user_id ist StudyLifes interne numerische Auth-User-Id (kein Klarname, s. docs/decisions.md \"Metrics dashboard\" im studylife-ai-Repo) - bei Bedarf per Grafana Value Mapping lesbar machen.",
+          "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+          "targets": [{ "expr": "sum by (user_id) (increase(studylife_ai_llm_cost_usd_total[1h]))", "legendFormat": "user {{user_id}}", "refId": "A" }] },
+        { "id": 8, "title": "Kosten nach Aufrufstelle (call_site)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "description": "chat, agent, rerank, retrieval, ingestion, eval, eval-fixture, eval-judge.",
+          "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+          "targets": [{ "expr": "sum by (call_site) (increase(studylife_ai_llm_cost_usd_total[1h]))", "legendFormat": "{{call_site}}", "refId": "A" }] },
+        { "id": 9, "title": "Kosten nach Modell", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+          "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+          "targets": [{ "expr": "sum by (model) (increase(studylife_ai_llm_cost_usd_total[1h]))", "legendFormat": "{{model}}", "refId": "A" }] },
+        { "id": 10, "title": "LLM-Latenz p50/p95/p99 (gesamt)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [
+            { "expr": "histogram_quantile(0.50, sum by (le) (rate(studylife_ai_llm_latency_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" },
+            { "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_ai_llm_latency_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" },
+            { "expr": "histogram_quantile(0.99, sum by (le) (rate(studylife_ai_llm_latency_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C" }
+          ] },
+        { "id": 11, "title": "LLM-Calls/Sekunde nach Aufrufstelle", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+          "targets": [{ "expr": "sum by (call_site) (rate(studylife_ai_llm_calls_total[5m]))", "legendFormat": "{{call_site}}", "refId": "A" }] },
+        { "id": 12, "title": "Erfolgs- vs. Fehlerrate (LLM-Calls)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" } } } },
+          "targets": [{ "expr": "sum by (status) (rate(studylife_ai_llm_calls_total[5m]))", "legendFormat": "{{status}}", "refId": "A" }] },
+        { "id": 13, "title": "Token-Verbrauch (Prompt vs. Completion)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 38 },
+          "targets": [
+            { "expr": "sum(rate(studylife_ai_llm_prompt_tokens_total[5m]))", "legendFormat": "prompt", "refId": "A" },
+            { "expr": "sum(rate(studylife_ai_llm_completion_tokens_total[5m]))", "legendFormat": "completion", "refId": "B" }
+          ] },
+        { "id": 14, "title": "Top-Nutzer nach Call-Volumen (24h)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
+          "targets": [{ "expr": "topk(10, sum by (user_id) (increase(studylife_ai_llm_calls_total[24h])))", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 15, "title": "Fehlgeschlagene Calls nach Aufrufstelle/Modell", "type": "timeseries", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 46 },
+          "description": "Nur status=\"failure\" - ein Anstieg zeigt, wo/wodurch gerade LLM-Aufrufe scheitern (Timeout, Rate-Limit, ...).",
+          "targets": [{ "expr": "sum by (call_site, model) (rate(studylife_ai_llm_calls_total{status=\"failure\"}[5m]))", "legendFormat": "{{call_site}} / {{model}}", "refId": "A" }] },
+        { "id": 16, "title": "Gesamtkosten pro Nutzer (30 Tage)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 54 },
+          "description": "Rollierende 30-Tage-Summe pro User - Obergrenze ist die Prometheus-Retention (k8s/14-prometheus.yaml), keine unbegrenzte 'seit Projektstart'-Summe. Dafür bräuchte es einen separaten persistenten Cost-Ledger (noch nicht gebaut, s. docs/decisions.md im studylife-ai-Repo).",
+          "fieldConfig": { "defaults": {}, "overrides": [
+            { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "unit", "value": "currencyUSD" } ] }
+          ] },
+          "targets": [{ "expr": "sort_desc(sum by (user_id) (increase(studylife_ai_llm_cost_usd_total[30d])))", "format": "table", "instant": true, "refId": "A" }] }
+      ]
+    }
+---
+# Separate ConfigMap (own folder, see the provider entry above) - studylife-mcp's own metrics
+# (metrics.py: tool-call counters/duration, rate-limit-rejection counters) need the
+# "job=studylife-mcp" scrape job in k8s/14-prometheus.yaml to exist first, added in the same
+# commit as this file. Metric/label names come directly from studylife-mcp's own metrics.py
+# (audit.py's @audited decorator and rate_limit.py's RateLimitMiddleware) - not yet verified
+# against a real live scrape from this cluster, since the job didn't exist before this commit.
+# Worth a spot-check in Grafana after the first real scrape interval.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-studylife-mcp
+  namespace: monitoring
+data:
+  studylife-mcp.json: |
+    {
+      "title": "StudyLife MCP",
+      "uid": "studylife-mcp-overview",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "description": "MCP-Tool-Call-Volumen, -Latenz und -Fehlerrate je Tool, plus Rate-Limit-Ablehnungen (Registrierung und Tool-Calls). Quelle: audit.py's @audited-Decorator und rate_limit.py (Prometheus-Metriken neben den strukturierten Logzeilen), siehe studylife-mcp-Repo metrics.py.",
+      "panels": [
+        { "id": 1, "title": "Service erreichbar", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "description": "Anzahl bereiter studylife-mcp-Pods, von Prometheus selbst über den Scrape-Erfolg gemessen (up-Metrik) - 0 heißt der Service antwortet nicht auf /metrics.",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "count(up{job=\"studylife-mcp\"} == 1) or vector(0)", "refId": "A" }] },
+        { "id": 2, "title": "Tool-Calls/Sekunde (gesamt)", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "targets": [{ "expr": "sum(rate(studylife_mcp_tool_calls_total[5m]))", "refId": "A" }] },
+        { "id": 3, "title": "Fehlerrate (Tool-Calls)", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.05 } ] } } },
+          "targets": [{ "expr": "sum(rate(studylife_mcp_tool_calls_total{status=\"error\"}[5m])) / sum(rate(studylife_mcp_tool_calls_total[5m])) or vector(0)", "refId": "A" }] },
+        { "id": 4, "title": "Rate-Limit-Ablehnungen/Sekunde", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "description": "Sollte dauerhaft nahe 0 liegen - Anstiege zeigen entweder Missbrauchsversuche (/register) oder einen durchdrehenden/fehlerhaften Client (/mcp).",
+          "targets": [{ "expr": "sum(rate(studylife_mcp_rate_limit_rejections_total[5m]))", "refId": "A" }] },
+        { "id": 5, "title": "Tool-Calls/Sekunde nach Tool", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "targets": [{ "expr": "sum by (tool) (rate(studylife_mcp_tool_calls_total[5m]))", "legendFormat": "{{tool}}", "refId": "A" }] },
+        { "id": 6, "title": "Tool-Call-Latenz p95 nach Tool", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (tool, le) (rate(studylife_mcp_tool_call_duration_seconds_bucket[5m])))", "legendFormat": "{{tool}}", "refId": "A" }] },
+        { "id": 7, "title": "Erfolgs- vs. Fehlerrate (Tool-Calls)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" } } } },
+          "targets": [{ "expr": "sum by (status) (rate(studylife_mcp_tool_calls_total[5m]))", "legendFormat": "{{status}}", "refId": "A" }] },
+        { "id": 8, "title": "Rate-Limit-Ablehnungen nach Pfad", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "targets": [{ "expr": "sum by (path) (rate(studylife_mcp_rate_limit_rejections_total[5m]))", "legendFormat": "{{path}}", "refId": "A" }] },
+        { "id": 9, "title": "Top-Tools nach Call-Volumen (24h)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+          "targets": [{ "expr": "topk(10, sum by (tool) (increase(studylife_mcp_tool_calls_total[24h])))", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 10, "title": "Fehlgeschlagene Calls nach Tool (24h)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+          "description": "Nur status=\"error\" - zeigt, welches Tool in den letzten 24h am häufigsten fehlgeschlagen ist.",
+          "targets": [{ "expr": "topk(10, sum by (tool) (increase(studylife_mcp_tool_calls_total{status=\"error\"}[24h])))", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 11, "title": "Registrierte OAuth-Clients (aktiviert vs. wartend)", "type": "timeseries", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
+          "description": "\"pending\" = per DCR registriert, aber nie eingeloggt (kein Access-Token je ausgestellt) - wird nach 24h ohne Aktivierung automatisch bereinigt (oauth_store.py UNUSED_CLIENT_TTL_SECONDS). Ein dauerhaft hoher/wachsender pending-Wert relativ zu activated wäre das Signal für laufenden Registrierungs-Missbrauch trotz Rate-Limit.",
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" } } } },
+          "targets": [{ "expr": "sum by (status) (studylife_mcp_registered_clients)", "legendFormat": "{{status}}", "refId": "A" }] }
+      ]
+    }

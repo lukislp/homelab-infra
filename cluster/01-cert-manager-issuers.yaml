@@ -1,0 +1,48 @@
+# Internal CA for the hop "Nginx Proxy Manager (outside the cluster) -> ingress-nginx".
+# Replaces the previously manually created Cloudflare origin CA certificate (see docs/SCALING.md) for
+# exactly this internal hop: NPM already validates towards the internet with a real certificate
+# issued by Cloudflare for the same domain - the origin CA certificate for the
+# internal hop reused the same trust space a second time, without real added value. Instead:
+# a dedicated, cluster-internal root CA, from which cert-manager automatically issues leaf
+# certificates for the ingress resources and renews them before expiry - independent of Cloudflare.
+#
+# Standard cert-manager bootstrap pattern for a self-managed internal CA:
+# 1. "selfsigned" ClusterIssuer that ONLY signs the root CA itself (chicken-and-egg problem: a
+#    root CA can only sign itself, there is no higher-level issuer yet).
+# 2. Certificate resource with isCA:true, signed by the bootstrap issuer above -> creates the
+#    secret "studylife-internal-ca" with ca.crt/tls.crt/tls.key of the root CA.
+# 3. Second ClusterIssuer of type "ca" that references exactly this secret - THIS one
+#    subsequently issues all real leaf certificates for studylife-tls/grafana-tls.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: studylife-selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: studylife-internal-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: studylife-internal-ca
+  secretName: studylife-internal-ca
+  duration: 87600h # 10 years - the root CA shouldn't need to rotate every few months
+  renewBefore: 720h # 30 days
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: studylife-selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: studylife-internal-ca-issuer
+spec:
+  ca:
+    secretName: studylife-internal-ca

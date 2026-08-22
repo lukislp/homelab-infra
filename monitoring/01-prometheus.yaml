@@ -1,0 +1,451 @@
+# Self-hosted Prometheus instead of Grafana Cloud (no external account needed) - no Helm
+# available, so manifests were hand-assembled (analogous to the existing approach for
+# CNPG/MetalLB/ingress-nginx). Scrape targets deliberately selected via existing labels
+# (relabel_configs "keep"), NOT via new pod annotations - avoids having to touch the
+# web/worker/CNPG/ingress-nginx manifests just for metric discovery.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  # For kubelet/cAdvisor scraping via the API server proxy (no direct network access to port
+  # 10250 needed) - makes the CPU/memory/volume usage panels in the CloudNativePG dashboard
+  # (and pod resource consumption per namespace in general) evaluable.
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+    rule_files:
+      - /etc/prometheus/recording-rules.yml
+    scrape_configs:
+      # CloudNativePG already ships the metrics exporter (port 9187) in every instance via the
+      # "cnpg-default-monitoring" ConfigMap installed by the operator, no sidecar needed. TLS
+      # natively via spec.monitoring.tls.enabled (k8s/02-postgres.yaml) - CNPG generates the
+      # server certificate itself (the same internal CA mechanism as for Postgres connections
+      # themselves), no manual certificate needed. insecure_skip_verify: the goal is encryption
+      # against eavesdropping on the cluster network, not certificate validation against an
+      # internal CA unknown to Prometheus (the same trade-off as for all other internal TLS hops).
+      - job_name: cnpg
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [studylife-scale] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+            regex: studylife-pg
+            action: keep
+          # Pooler pods (k8s/11-pooler.yaml) carry the same cnpg.io/cluster label as real
+          # Postgres instances, but run as PgBouncer WITHOUT the metrics exporter on 9187 -
+          # without this drop they would falsely and permanently show up as "down".
+          - source_labels: [__meta_kubernetes_pod_label_cnpg_io_poolerName]
+            regex: ""
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9187"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          # Needed for the CloudNativePG community dashboard (17c, Grafana dashboard ID 20417) -
+          # its "namespace" template variable extracts this label directly from the
+          # cnpg_collector_up time series. Without this step, __meta_kubernetes_namespace stays
+          # just an internal meta-label and never ends up as a real "namespace" label on the series.
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+      - job_name: redis
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [studylife-scale] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: redis-cluster
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9121"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+      # studylife-ai (separate repo/namespace, see its own k8s/04-app.yaml) - LLM cost/latency/
+      # token counters (studylife_ai_llm_*, hand-registered in llm/metrics.py) plus the FastAPI
+      # HTTP auto-instrumentation (http_requests_total etc.), both exposed on the app's own
+      # port 8000 at /metrics (Prometheus' default path, no __metrics_path__ override needed).
+      # Dashboard: k8s/17b-grafana-dashboards.yaml "StudyLife AI" folder.
+      - job_name: studylife-ai
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [studylife-ai] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: studylife-ai
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:8000"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+      # studylife-mcp (separate repo/namespace, see its own k8s/04-app.yaml) - tool-call
+      # counters/duration and rate-limit-rejection counters (studylife_mcp_*, hand-registered
+      # in metrics.py), exposed on the app's own port 8000 at /metrics. Reached directly
+      # pod-to-pod like every job on this page - never through the Gateway or Tailscale Funnel
+      # ingress paths that app also has. Dashboard: k8s/17b-grafana-dashboards.yaml
+      # "StudyLife MCP" folder.
+      - job_name: studylife-mcp
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [studylife-mcp] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: studylife-mcp
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:8000"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+      # NGINX Gateway Fabric (see k8s/06c-nginx-gateway-fabric.md, now completely replaces the
+      # decommissioned ingress-nginx): the control-plane pod (nginx-gateway:
+      # nginx_gateway_fabric_*/controller_runtime_*) and the NGINX data plane provisioned per
+      # gateway (studylife-gateway-nginx: nginx_http_*) both export on port 9113 (verified live).
+      - job_name: nginx-gateway-fabric
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [nginx-gateway] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            regex: nginx-gateway|studylife-gateway-nginx
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9113"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          # "component" distinguishes the control plane from the data plane in the dashboard queries
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            target_label: component
+      - job_name: kube-state-metrics
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [monitoring] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: kube-state-metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:8080"
+      - job_name: node-exporter
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [monitoring] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: node-exporter
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9100"
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+      # Loki (k8s/18-loki.yaml) - exposes /metrics on the same port as its log API (3100, no
+      # separate metrics port). Feeds the "Log Pipeline Health" row on the Kubernetes Logs
+      # dashboard (k8s/17b-grafana-dashboards.yaml).
+      - job_name: loki
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [monitoring] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: loki
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:3100"
+      # Promtail (k8s/19-promtail.yaml) - DaemonSet, one target per node (same role:pod +
+      # per-pod discovery pattern as node-exporter above, not a single aggregate target).
+      # sent/dropped entry counters are the direct signal for the two root causes found the
+      # first time this was actually deployed (see docs/decisions.md in studylife-mcp): a
+      # stalled discovery pipeline shows up here as sent_entries_total flatlining, a missing
+      # NetworkPolicy shows up as dropped_entries_total{reason="ingester_error"} climbing.
+      - job_name: promtail
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [monitoring] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: promtail
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9080"
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+      # Nginx Proxy Manager (NPM) + Keepalived - runs OUTSIDE the K8s cluster directly as a
+      # Docker Compose stack on both Pis (see docs/SCALING.md), hence static_configs instead of
+      # kubernetes_sd_configs. nginx-prometheus-exporter scrapes NPM's stub_status (enabled via
+      # custom config under data/nginx/custom/http.conf, NOT publicly reachable - the exporter
+      # port itself is bound on the respective Pi, not published to the internet). Only basic
+      # metrics available (active/reading/writing/waiting connections, total requests) -
+      # stub_status doesn't provide latency/status-code breakdowns, the same limitation as for
+      # the ingress-nginx job above.
+      # Targets updated 2026-08-12 (found via a firing "NPM down on both Pis" alert): both were
+      # still 192.168.1.x, a subnet neither Pi has had an interface on for a while - `kubectl get
+      # nodes -o wide` gives each Pi's actual current INTERNAL-IP (192.168.20.x), same last
+      # octet as the stale entries (.11/.95), consistent with a network renumbering that never
+      # got reflected here since these are static_configs, not auto-discovered.
+      - job_name: npm
+        static_configs:
+          - targets: ["192.168.20.11:9113"]
+            labels: { pi: pinode01 }
+          - targets: ["192.168.20.95:9113"]
+            labels: { pi: pinode02 }
+      # From here on: additional already-running cluster components that export Prometheus
+      # metrics out of the box but weren't scraped so far - verified live against each
+      # individual port (curl from a debug pod) before the job was added here. NOT added: CNPG
+      # pooler metrics (port 9127 declared in the pod spec, but "connection refused" - the
+      # PgBouncer metrics exporter apparently isn't active for us, a separate topic for later).
+      - job_name: coredns
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [kube-system] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_k8s_app]
+            regex: kube-dns
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9153"
+      - job_name: metallb
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [metallb-system] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: metallb
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_component]
+            target_label: component
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:7472"
+      # certmanager_certificate_expiration_timestamp_seconds - basis for the new "certificate
+      # expiring soon" alert (k8s/17d-grafana-alerting.yaml). Only the main controller
+      # (component=controller) exports this metric, cainjector/webhook only generic
+      # controller-runtime metrics.
+      - job_name: cert-manager
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [cert-manager] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+            regex: controller
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9402"
+      - job_name: flux
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [flux-system] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: source-controller|kustomize-controller|image-reflector-controller|image-automation-controller
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: flux_controller
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:8080"
+      - job_name: prometheus
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [monitoring] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: prometheus
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9090"
+      # Bug found live (discovered while locking down the monitoring namespace via
+      # NetworkPolicy, though not causally related to that): Grafana forces port 3000 entirely
+      # onto HTTPS (GF_SERVER_PROTOCOL=https, see k8s/17-grafana.yaml), but this job kept
+      # scraping over plaintext HTTP - Grafana's own HTTP server responded with "400 Bad
+      # Request", and the target showed permanently "down" ever since. scheme+tls_config added,
+      # same as for the cnpg job above.
+      - job_name: grafana
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [monitoring] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: grafana
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:3000"
+      # Kubelet/cAdvisor via the API server proxy (no direct network access to port 10250
+      # needed, just the permission against the K8s API itself that already exists) - makes the
+      # CPU/memory/volume usage panels in the CloudNativePG community dashboard (17c)
+      # evaluable, but is generally useful for pod resource consumption per namespace. job and
+      # metrics_path labels deliberately named identically to the kube-prometheus-stack
+      # convention ("job=kubelet", "metrics_path=/metrics/cadvisor" for the cAdvisor part),
+      # because community dashboards filter exactly on that.
+      - job_name: kubelet
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics
+      - job_name: cadvisor
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+          - target_label: job
+            replacement: kubelet
+          - target_label: metrics_path
+            replacement: /metrics/cadvisor
+  # Never normally missing in kube-prometheus-stack (the standard "k8s.rules" recording rule
+  # from the kubernetes-mixin project), but absent for us because we don't use the Prometheus
+  # Operator/standard rule bundles. The CloudNativePG dashboard (17c) needs it for its "CPU
+  # Utilisation" panel. Simplified (no "cluster" label join, since this is a single cluster).
+  recording-rules.yml: |
+    groups:
+      - name: k8s.rules
+        rules:
+          - record: node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate
+            expr: |
+              sum by (namespace, pod, container) (
+                irate(container_cpu_usage_seconds_total{job="kubelet", metrics_path="/metrics/cadvisor", image!=""}[5m])
+              )
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: monitoring
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    # 5Gi -> 20Gi 2026-08-13, alongside the retention bump to 30d (~9.4GB estimated) - the
+    # local-path StorageClass doesn't support live volume expansion (no
+    # allowVolumeExpansion), so this requires deleting and recreating the PVC, not just an
+    # in-place edit (existing 7d of data is lost, acceptable - it was mostly same-day test
+    # traffic).
+    requests: { storage: 20Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  replicas: 1 # pure observer, no HA need for a learning project of this size
+  strategy:
+    type: Recreate # single instance with an RWO volume
+  selector:
+    matchLabels: { app: prometheus }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      serviceAccountName: prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            # Raised from 7d 2026-08-13: real usage was ~315MB/day against 195GB+ free on both
+            # node root filesystems (verified live via node_filesystem_avail_bytes) - 30d costs
+            # ~9.4GB, comfortably affordable. Needed for the studylife-ai per-user cost dashboard
+            # to show more than a rolling week.
+            - --storage.tsdb.retention.time=30d
+          ports:
+            - containerPort: 9090
+          resources:
+            # Used to be 256Mi/512Mi - live-measured consumption was 483Mi (close to the old
+            # limit), OOMKilled observed (2026-07-18, see docs/SCALING.md). Reason: many scrape
+            # targets/dashboards (Node Exporter Full, NGF controller metrics, etc.) drive up
+            # time-series cardinality.
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { cpu: 500m, memory: 1Gi }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap: { name: prometheus-config }
+        - name: data
+          persistentVolumeClaim: { claimName: prometheus-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  selector: { app: prometheus }
+  ports:
+    - port: 9090
+      targetPort: 9090

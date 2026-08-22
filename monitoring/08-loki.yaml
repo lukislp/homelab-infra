@@ -1,0 +1,100 @@
+# Log aggregation - single-binary mode (no distributed Loki needed for this cluster size),
+# filesystem storage with limited retention (7 days, analogous to Prometheus' retention).
+# Complements the metrics from Prometheus/Grafana with searchable logs, without dedicated
+# app-level tracing in the .NET code (deliberately excluded).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: monitoring
+data:
+  loki.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore: { store: inmemory }
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index: { prefix: index_, period: 24h }
+    limits_config:
+      retention_period: 168h # 7 days, limits growth to the Pi's storage budget
+    compactor:
+      working_directory: /loki/compactor
+      retention_enabled: true
+      delete_request_store: filesystem # Mandatory from Loki 3.x onward once retention is active
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: loki-data
+  namespace: monitoring
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 5Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: loki }
+  template:
+    metadata:
+      labels: { app: loki }
+    spec:
+      # Pinned to pinode02 (8GB RAM) instead of pinode01 (4GB) - was already landing there by
+      # scheduler coincidence (matches where the local-path PVC's PV was actually provisioned,
+      # see loki-data below), this just makes it a guarantee instead of an accident. OOMKilled
+      # live (2026-08-14, exit 137) at the old 256Mi limit once Promtail was actually shipping
+      # full-cluster log volume instead of sitting empty - 128Mi/256Mi was sized before the log
+      # pipeline was ever really exercised.
+      nodeSelector:
+        kubernetes.io/hostname: pinode02
+      containers:
+        - name: loki
+          image: grafana/loki:3.2.1
+          args: ["-config.file=/etc/loki/loki.yaml"]
+          ports:
+            - containerPort: 3100
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 300m, memory: 1Gi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/loki }
+            - { name: data, mountPath: /loki }
+          readinessProbe:
+            httpGet: { path: /ready, port: 3100 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - { name: config, configMap: { name: loki-config } }
+        - { name: data, persistentVolumeClaim: { claimName: loki-data } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  selector: { app: loki }
+  ports:
+    - port: 3100
+      targetPort: 3100

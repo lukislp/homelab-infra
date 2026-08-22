@@ -1,0 +1,88 @@
+# Reads container logs per node (/var/log/pods hostPath) and ships them with Kubernetes
+# metadata (namespace/pod/container labels) to Loki - DaemonSet, one pod per node, automatic.
+#
+# INCIDENT: this file (and k8s/18-loki.yaml) existed in git for a while but was never
+# successfully deployed. First real deploy attempt found two separate root causes:
+#
+#   1. The original kubernetes_sd_configs-based scrape_configs below (role: pod, relabeling
+#      __meta_kubernetes_pod_uid into a glob __path__) never produced a single target -
+#      promtail_targets_active_total stayed 0 indefinitely, log output stopped dead after
+#      "Starting provider" with no further discovery/error messages even at debug log level.
+#      Confirmed NOT an RBAC/TLS/network problem: raw LIST/WATCH calls against the API server
+#      using the exact same ServiceAccount token succeeded instantly and correctly (both with
+#      and without certificate validation). Root cause not fully identified - looks like a
+#      genuine bug/incompatibility between this Promtail version's Kubernetes SD client and
+#      this specific K3s API server, not a configuration mistake. Worked around rather than
+#      chased further: this file now extracts namespace/pod/container straight from the
+#      hostPath file structure via a pipeline_stages regex instead of calling the Kubernetes
+#      API at all - sidesteps the bug entirely and needs no cluster RBAC whatsoever (the
+#      ServiceAccount/ClusterRole/ClusterRoleBinding this file used to define are gone).
+#   2. Separately, the "monitoring" namespace's default-deny-ingress NetworkPolicy had no
+#      matching "allow-ingress-to-loki" rule (every other service in that namespace has its
+#      own) - pushes to Loki failed with "connection refused" regardless of the above. Fixed
+#      in this repo's own k8s/12-network-policies.yaml (allow-ingress-to-loki).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: monitoring
+data:
+  promtail.yaml: |
+    server:
+      http_listen_port: 9080
+    positions:
+      filename: /run/promtail/positions.yaml
+    clients:
+      - url: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+    scrape_configs:
+      - job_name: kubernetes-pods
+        static_configs:
+          - targets: ["localhost"]
+            labels:
+              job: kubernetes-pods
+              __path__: /var/log/pods/*/*/*.log
+        pipeline_stages:
+          # Real directory structure per node: /var/log/pods/<namespace>_<pod>_<uid>/<container>/N.log
+          # (verified live) - Promtail auto-populates the "filename" field with the actual
+          # matched path for every discovered file, so this needs no Kubernetes API calls at
+          # all to recover the same namespace/pod/container labels the SD-based approach
+          # above was meant to produce.
+          - regex:
+              source: filename
+              expression: '^/var/log/pods/(?P<namespace>[^_]+)_(?P<pod>.+)_[a-f0-9-]+/(?P<container>[^/]+)/\d+\.log$'
+          - labels:
+              namespace:
+              pod:
+              container:
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels: { app: promtail }
+  template:
+    metadata:
+      labels: { app: promtail }
+    spec:
+      # No Kubernetes API access needed at all now (see the incident note above) - was
+      # "promtail" (a dedicated ServiceAccount/ClusterRole/ClusterRoleBinding, now removed)
+      # back when kubernetes_sd_configs required list/watch on pods/nodes.
+      automountServiceAccountToken: false
+      containers:
+        - name: promtail
+          image: grafana/promtail:3.2.1
+          args: ["-config.file=/etc/promtail/promtail.yaml"]
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/promtail }
+            - { name: pods-logs, mountPath: /var/log/pods, readOnly: true }
+            - { name: positions, mountPath: /run/promtail }
+      volumes:
+        - { name: config, configMap: { name: promtail-config } }
+        - { name: pods-logs, hostPath: { path: /var/log/pods } }
+        - { name: positions, hostPath: { path: /run/promtail, type: DirectoryOrCreate } }

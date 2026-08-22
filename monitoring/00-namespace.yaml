@@ -1,0 +1,21 @@
+# Pod Security Standards ONLY as warn/audit (baseline), NOT enforce: piwatch-node-agent and
+# node-exporter legitimately need hostPath (/sys,/proc,/) - node-exporter additionally
+# hostNetwork+hostPID. "baseline" forbids hostPath volumes entirely, an enforce would block
+# both DaemonSets on their next rollout. warn/audit still provide visibility into everything
+# else here (Grafana, Prometheus, kube-state-metrics, the piwatch deployment), which could
+# certainly be hardened.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: baseline
+---
+# see the identical comment in k8s/00-namespace.yaml (CIS 5.1.5/5.1.6, kube-bench).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: monitoring
+automountServiceAccountToken: false

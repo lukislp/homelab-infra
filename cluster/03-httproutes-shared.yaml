@@ -1,0 +1,64 @@
+# HTTPRoutes for the NGF gateway (cluster/02-gateway.yaml) attaching to studylife's shared
+# Gateway - moved here from studylife/k8s/07d-httproutes.yaml as part of the cluster-wide-infra
+# split (see docs/README.md). Referencing a Gateway object applied from a different repo/path
+# than the HTTPRoute itself is normal, intended Gateway API usage (route and gateway don't need
+# common ownership) - see studylife/k8s/07d-httproutes.yaml for the studylife-web/uptime-kuma
+# routes, which stayed there since they're studylife-scale-specific.
+#
+# BackendTLSPolicy replaces the backend-protocol=HTTPS annotation for the encrypted
+# gateway -> pod hop. The Gateway API mandatorily VERIFIES the backend hop - CA reference to the
+# ca.crt in the respective *-backend-tls secret (supplied by cert-manager when issuing),
+# hostname = service DNS name (SAN of the backend certificate, see monitoring/04-grafana.yaml).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: studylife-gateway
+      namespace: nginx-gateway
+  hostnames:
+    - grafana.home.lan
+    - grafana.example.com
+  rules:
+    - backendRefs:
+        - name: grafana
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: grafana-backend-tls
+  namespace: monitoring
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: grafana
+  validation:
+    caCertificateRefs:
+      - group: ""
+        kind: Secret
+        name: grafana-backend-tls
+    hostname: grafana.monitoring.svc.cluster.local
+---
+apiVersion: gateway.nginx.org/v1alpha1
+kind: RateLimitPolicy
+metadata:
+  name: grafana-rate-limit
+  namespace: monitoring
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: grafana
+  rateLimit:
+    local:
+      rules:
+        - zoneSize: 10m
+          key: "$binary_remote_addr"
+          rate: 20r/s
+          burst: 200
+          noDelay: true
+    rejectCode: 503

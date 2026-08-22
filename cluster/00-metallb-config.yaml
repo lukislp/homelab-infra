@@ -1,0 +1,25 @@
+# MetalLB gives "Service type: LoadBalancer" a stable external IP on bare metal (no cloud provider
+# that would otherwise assign a real LB IP). Layer 2 mode (ARP-based) instead of BGP,
+# because no BGP-capable router should be assumed in the home network - the standard choice for
+# homelab clusters. IMPORTANT: the IP range below is ONLY for the local Docker Desktop
+# test cluster (172.18.0.0/16 subnet of the "kind" Docker network) - for the real
+# multi-node cluster it must be adapted to the actual home-network subnet (a small,
+# permanently reserved range that is NOT handed out by the DHCP server, otherwise IP conflicts
+# are likely).
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: studylife-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.18.255.200-172.18.255.250
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: studylife-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - studylife-pool

@@ -1,0 +1,187 @@
+# monitoring namespace: the same default-deny ingress strategy as studylife's own
+# studylife-scale NetworkPolicies (see studylife/k8s/12-network-policies.yaml) - in particular
+# piwatch has cluster-wide read access to pods/nodes/events/logs via ClusterRole AND is
+# reachable via two external hostnames. Without these policies, a compromised piwatch pod would
+# have unrestricted network access to the entire cluster network. Egress deliberately stays open
+# (same trade-off as studylife-scale) - Prometheus' platform-wide scraping (CoreDNS, MetalLB,
+# Flux, NGINX Gateway Fabric, cert-manager, CNPG/Redis in studylife-scale) would otherwise need a
+# complete egress allowlist per scrape job.
+#
+# Moved here from studylife/k8s/12-network-policies.yaml as part of the cluster-wide-infra split
+# (see docs/README.md) - object names/namespaces are unchanged, this is a pure relocation.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-grafana
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: grafana } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: prometheus } } # Prometheus' own "grafana" scrape job
+        # Uptime Kuma (studylife-scale) may also check Grafana internally, analogous to
+        # studylife-web (see studylife's allow-ingress-to-web) - harmless if no monitor exists for it (yet).
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+          podSelector: { matchLabels: { app: uptime-kuma } }
+      ports:
+        - { protocol: TCP, port: 3000 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-prometheus
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: prometheus } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: grafana } } # datasource queries
+        - podSelector: { matchLabels: { app: prometheus } } # its own scrape job on itself
+        # piwatch's optional PIWATCH_PROMETHEUS_URL feature (PVC usage %, see the piwatch repo's
+        # collectors/pvc.py) queries kubelet_volume_stats_* here directly - without this, the
+        # request gets "connection refused" the same way promtail's did before allow-ingress-to-loki
+        # existed (default-deny-ingress above blocks it silently).
+        - podSelector: { matchLabels: { app: piwatch } }
+      ports:
+        - { protocol: TCP, port: 9090 }
+---
+# Missing until now (k8s/18-loki.yaml/k8s/19-promtail.yaml existed in git but were never
+# actually deployed) - this default-deny-ingress namespace silently blocked every push from
+# promtail with "connection refused" the first time both were actually applied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-loki
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: loki } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: promtail } } # log pushes
+        - podSelector: { matchLabels: { app: grafana } } # datasource queries (Explore)
+        - podSelector: { matchLabels: { app: prometheus } } # scrapes /metrics on the same port as the log API
+      ports:
+        - { protocol: TCP, port: 3100 }
+---
+# Promtail's own /metrics (port 9080, separate from the log-push traffic FROM promtail
+# above) had no ingress policy at all - Prometheus' "promtail" scrape job (monitoring/
+# 01-prometheus.yaml) got "connection refused" from every pod until this was added, the same
+# default-deny-ingress gap as allow-ingress-to-loki above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-promtail
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: promtail } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: prometheus } }
+      ports:
+        - { protocol: TCP, port: 9080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-kube-state-metrics
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: kube-state-metrics } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: prometheus } }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# node-exporter runs with hostNetwork:true (needs access to the host's /proc, /sys) - its "pod
+# IP" is thus the node IP itself. Whether the respective CNI enforces NetworkPolicies for
+# hostNetwork pods at all is implementation-dependent (often NOT, since the traffic never goes
+# through the pod network namespace bridge) - this rule doesn't hurt regardless and documents
+# the intent in case a future CNI handles this differently.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-node-exporter
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: node-exporter } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: prometheus } }
+      ports:
+        - { protocol: TCP, port: 9100 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-piwatch
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: piwatch } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+          podSelector: { matchLabels: { app: uptime-kuma } }
+      ports:
+        - { protocol: TCP, port: 8000 }
+---
+# The piwatch deployment queries each node-agent pod for its hardware metrics (see the piwatch
+# repo, PIWATCH_AGENT_SERVICE) - without this rule, the dashboard would stay empty for all Pi
+# hardware panels, even though both piwatch and the node-agent itself keep showing "Running".
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-piwatch-node-agent
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: piwatch-node-agent } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: piwatch } }
+      ports:
+        - { protocol: TCP, port: 9101 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nginx-gateway-to-grafana
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: grafana } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: nginx-gateway } }
+      ports:
+        - { protocol: TCP, port: 3000 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nginx-gateway-to-piwatch
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: piwatch } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: nginx-gateway } }
+      ports:
+        - { protocol: TCP, port: 8000 }

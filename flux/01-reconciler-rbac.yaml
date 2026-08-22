@@ -1,0 +1,97 @@
+# Least-privilege replacement for kustomize-controller's stock cluster-admin binding
+# (k8s/flux/00-install.yaml's "cluster-reconciler-flux-system", vendored by `flux install` -
+# DO NOT edit that file directly, it gets silently regenerated on the next `flux install`/
+# version upgrade).
+#
+# Scope was derived from what kustomize-controller's Kustomizations actually apply:
+# studylife-deploy (05-kustomization.yaml, exclusively k8s/flux/deploy/kustomization.yaml's
+# resource list: 04-web.yaml, 05-worker.yaml, 14-prometheus.yaml, 17b/17c/17d-grafana-*.yaml),
+# studylife-ai-deploy, studylife-mcp-deploy, and piwatch-deploy (20-piwatch-kustomization.yaml,
+# piwatch repo's own deploy/flux-deploy/ subset). The rest of each repo's manifests (Postgres/
+# Gateway/MetalLB/NetworkPolicies/HPA/PDB/cert-manager ClusterIssuers/Namespaces/RBAC/
+# HTTPRoutes/SealedSecrets/...) is applied directly by the operator (bootstrap-cluster.ps1 for
+# this repo, by hand for the others), NOT through Flux - so kustomize-controller never touches
+# any of those apiGroups and needs no permissions for them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: flux-studylife-reconciler
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts", "configmaps", "persistentvolumeclaims", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Added for piwatch-deploy (20-piwatch-kustomization.yaml) - its node-agent DaemonSet's spec
+  # changes over time too (e.g. privileged:true + a /dev mount for NVMe SMART monitoring), not
+  # just its image tag, so it needed to be part of the Flux-managed subset rather than staying
+  # bootstrap-only like the other repos' non-Deployment resources. No prior Kustomization needed
+  # this apiGroup/resource combination.
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Also added for piwatch-deploy: its flux-deploy/ subset includes pdb.yaml
+  # (a PodDisruptionBudget for the piwatch Deployment), which needs its own apiGroup -
+  # missed in the first pass, caught when piwatch-deploy's dry-run apply failed forbidden.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Read-only on replicasets: Flux's health check computes a Deployment's actual rollout
+  # status (kstatus) by inspecting its owned ReplicaSets, not just the Deployment object
+  # itself - missing this caused "replicasets.apps is forbidden" health-check timeouts in
+  # production during the live cutover of this file (apply itself always succeeded fine,
+  # only the health-check readback failed).
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Transitively required: 14-prometheus.yaml's own ClusterRole "prometheus" grants exactly
+  # these rules to the prometheus ServiceAccount for scraping - Kubernetes' RBAC
+  # privilege-escalation check requires whoever CREATES a ClusterRole/ClusterRoleBinding to
+  # already hold at least the permissions it grants, so kustomize-controller needs these too.
+  # Listed explicitly instead of granting the "escalate"/"bind" verbs on
+  # clusterroles/clusterrolebindings, which would reopen the exact loophole this whole
+  # replacement exists to close.
+  - apiGroups: [""]
+    resources: ["nodes", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flux-studylife-reconciler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: flux-studylife-reconciler
+subjects:
+  - kind: ServiceAccount
+    name: kustomize-controller
+    namespace: flux-system
+
+# ── Manual cutover (NOT applied automatically - do this deliberately, one step at a time) ──
+#
+# 1. kubectl apply -f k8s/flux/06-reconciler-rbac.yaml
+# 2. kubectl delete clusterrolebinding cluster-reconciler-flux-system
+# 3. kubectl -n flux-system annotate kustomization studylife-deploy \
+#      reconcile.fluxcd.io/requestedAt="$(date +%s)" --overwrite
+#    (or: flux reconcile kustomization studylife-deploy --with-source, if the flux CLI is
+#    available) - then immediately watch for permission errors:
+#    kubectl -n flux-system logs deploy/kustomize-controller --tail=50 -f
+# 4. If anything comes back as "forbidden": kubectl apply -f k8s/flux/00-install.yaml
+#    re-creates the stock cluster-admin binding as an immediate rollback (00-install.yaml is
+#    otherwise unaffected/untouched by this change), then diagnose the missing rule and add it
+#    to this file's ClusterRole before retrying.
+#
+# CAVEAT: a future `flux install`/`flux bootstrap` re-run regenerates k8s/flux/00-install.yaml
+# and recreates the stock "cluster-reconciler-flux-system" cluster-admin binding - step 2 above
+# needs to be redone after any such re-run (see docs/SCALING.md).

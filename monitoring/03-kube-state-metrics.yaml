@@ -1,0 +1,74 @@
+# K8s object state (pod restarts, replica availability, PVC usage) - the rest of the
+# cluster overview dashboard, makes it visible e.g. WHETHER the anti-affinity from an earlier
+# round actually distributes across nodes.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-state-metrics
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "persistentvolumeclaims", "namespaces"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["list", "watch"]
+  # v2.18.0+ watches EndpointSlice instead of the deprecated v1 Endpoints API by default
+  # (kube_endpoint_* metrics never used by any dashboard here, so nothing else to update) -
+  # "endpoints" removed above, this replaces it.
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-state-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+    namespace: monitoring
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kube-state-metrics }
+  template:
+    metadata:
+      labels: { app: kube-state-metrics }
+    spec:
+      serviceAccountName: kube-state-metrics
+      containers:
+        - name: kube-state-metrics
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0
+          # v2.18.0 defaults to watching many more resource types than v2.13.0 did (CSRs,
+          # Leases, ResourceQuotas, admission webhooks, CronJobs, HPAs, NetworkPolicies,
+          # StorageClasses, ...), none of which this cluster's RBAC above grants - found live
+          # as a wall of "Failed to watch: forbidden" errors right after the upgrade.
+          # Explicitly restricting --resources to exactly what's actually used (matches the
+          # RBAC rules above 1:1) instead of widening RBAC to cluster-wide visibility into
+          # CSRs/webhooks/etc. that nothing here needs.
+          args:
+            - --resources=pods,nodes,services,persistentvolumeclaims,namespaces,deployments,replicasets,statefulsets,daemonsets,poddisruptionbudgets,endpointslices
+          ports:
+            - containerPort: 8080
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }

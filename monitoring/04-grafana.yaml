@@ -1,0 +1,149 @@
+# IMPORTANT, incident found live: NEVER apply this file directly to prod via "kubectl apply -f
+# k8s/17-grafana.yaml", not even for a seemingly isolated change (e.g. automountServiceAccountToken) -
+# it contains placeholder hostnames ("grafana.example.invalid"/"grafana-public.example.invalid"),
+# which are ONLY replaced by bootstrap-cluster.ps1's -GrafanaHost/-GrafanaPublicHost parameters at
+# apply time. A direct apply overwrites the real hostnames in the ingress AND (via cert-manager
+# ingress-shim) in the certificate - this made Grafana unreachable for everyone, until the error
+# was fixed live via "kubectl patch ingress" + certificate reissue. For targeted changes:
+# "kubectl patch" against the individual resource, exactly like the Cache__ConnectionString
+# incident at k8s/01-config-and-secret.yaml (see the "Client TLS" section above).
+#
+# Self-hosted Grafana instead of Grafana Cloud (no external account needed). Provisioning via
+# ConfigMap (Grafana automatically reads /etc/grafana/provisioning/{datasources,dashboards} on
+# startup) - the datasource is thus available immediately, without manual clicking. The
+# dashboard contents themselves deliberately live in the SEPARATE k8s/17b-grafana-dashboards.yaml
+# (see the comment there) - this file now contains only infrastructure (including the ingress
+# host placeholders that bootstrap-cluster.ps1 resolves).
+#
+# Backend TLS for the ingress-nginx -> Grafana hop: leaf certificate from the same
+# cluster-internal CA as the external ingress certificate (k8s/07b-cert-manager-issuers.yaml).
+# Unlike Kestrel (k8s/04-web.yaml), Grafana can't offer HTTPS on a second port in addition to
+# HTTP - GF_SERVER_PROTOCOL switches the SINGLE port 3000 entirely to HTTPS (see the deployment
+# below), so the readiness probe and ingress backend protocol are switched along with it.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-backend-tls
+  namespace: monitoring
+spec:
+  secretName: grafana-backend-tls
+  dnsNames:
+    - grafana.monitoring.svc.cluster.local
+    - grafana
+  issuerRef:
+    name: studylife-internal-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      # Explicit, fixed UIDs instead of the otherwise randomly generated ones per Grafana
+      # instance - so dashboard JSONs (e.g. k8s/17c-grafana-community-dashboards.yaml) can
+      # reference "prometheus"/"loki" as fixed values, identical regardless of environment
+      # (test cluster AND prod).
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.monitoring.svc.cluster.local:9090
+        isDefault: true
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://loki.monitoring.svc.cluster.local:3100
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  namespace: monitoring
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: grafana }
+  template:
+    metadata:
+      labels: { app: grafana }
+    spec:
+      # Grafana's image runs as UID 472 and needs write access to its own data directory - a
+      # fresh PVC otherwise belongs to root, which the grafana user can't write to.
+      securityContext:
+        fsGroup: 472
+      # Grafana doesn't need Kubernetes API access (datasources are Prometheus/static).
+      automountServiceAccountToken: false
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.1
+          env:
+            # GF_SERVER_* is Grafana's standard way to set any grafana.ini setting via an env
+            # var (GF_<SECTION>_<KEY>) - no separate grafana.ini ConfigMap mount needed.
+            - { name: GF_SERVER_PROTOCOL, value: https }
+            - { name: GF_SERVER_CERT_FILE, value: /etc/grafana-backend-tls/tls.crt }
+            - { name: GF_SERVER_CERT_KEY, value: /etc/grafana-backend-tls/tls.key }
+          ports:
+            - containerPort: 3000
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 256Mi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/grafana }
+            - { name: datasources, mountPath: /etc/grafana/provisioning/datasources }
+            - { name: dashboard-provider, mountPath: /etc/grafana/provisioning/dashboards }
+            # ENTIRE ConfigMaps mounted as a directory (no subPath) - every key in them
+            # automatically becomes a file. A new/changed dashboard therefore only needs a
+            # commit in k8s/17b or 17c (Flux rolls it out automatically), NEVER a change here
+            # again - see the comment in k8s/17b-grafana-dashboards.yaml.
+            - { name: dashboard-core, mountPath: /etc/grafana/provisioning/dashboard-json/core }
+            - { name: dashboard-community, mountPath: /etc/grafana/provisioning/dashboard-json/community }
+            - { name: dashboard-studylife-ai, mountPath: /etc/grafana/provisioning/dashboard-json/studylife-ai }
+            - { name: dashboard-studylife-mcp, mountPath: /etc/grafana/provisioning/dashboard-json/studylife-mcp }
+            - { name: alerting, mountPath: /etc/grafana/provisioning/alerting }
+            - { name: backend-tls, mountPath: /etc/grafana-backend-tls, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3000, scheme: HTTPS }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: grafana-data } }
+        - { name: datasources, configMap: { name: grafana-datasources } }
+        - { name: dashboard-provider, configMap: { name: grafana-dashboard-provider } }
+        - { name: dashboard-core, configMap: { name: grafana-dashboard-core } }
+        - { name: dashboard-community, configMap: { name: grafana-dashboard-community } }
+        - { name: dashboard-studylife-ai, configMap: { name: grafana-dashboard-studylife-ai } }
+        - { name: dashboard-studylife-mcp, configMap: { name: grafana-dashboard-studylife-mcp } }
+        - { name: alerting, configMap: { name: grafana-alerting } }
+        - { name: backend-tls, secret: { secretName: grafana-backend-tls } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  selector: { app: grafana }
+  ports:
+    - port: 80
+      targetPort: 3000
+# Ingress object removed (ingress-nginx decommissioned, see docs/SCALING.md "Migration to
+# NGINX Gateway Fabric completed") - routing now runs exclusively via the HTTPRoute in
+# k8s/07d-httproutes.yaml.
