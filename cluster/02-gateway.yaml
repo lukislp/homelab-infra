@@ -276,3 +276,30 @@ spec:
           from: Selector
           selector:
             matchLabels: { kubernetes.io/metadata.name: studylife-mcp }
+    # homelab-autodoc (separate repo/namespace) - same -heim/-public pair as every other service.
+    - name: autodoc-heim
+      hostname: autodoc.heim.lan
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: autodoc-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: homelab-autodoc }
+    - name: autodoc-public
+      hostname: autodoc.lukas2311-homelab.com
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: autodoc-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: homelab-autodoc }
