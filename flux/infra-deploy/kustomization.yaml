@@ -1,0 +1,27 @@
+# Applies EXCLUSIVELY the Flux-managed subset of monitoring/ to the cluster - mirrors
+# studylife/k8s/flux/deploy/kustomization.yaml's own scoping decision. These are the only 4
+# files out of this whole repo that get continuously reconciled from Git; everything else here
+# (cluster/, the rest of monitoring/, provisioning/) is applied once via
+# provisioning/bootstrap-cluster.ps1, same as studylife's own k8s/ folder.
+#
+# No patches needed here (unlike studylife's own deploy/kustomization.yaml, which forces
+# imagePullPolicy: Always on the app Deployments) - none of these 4 objects have a
+# git-committed placeholder that needs overriding at apply time.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Prometheus scrape config - WARNING: Prometheus only reads prometheus.yml at startup
+  # (--web.enable-lifecycle not set), a plain ConfigMap apply is NOT enough, after every scrape
+  # config change additionally "kubectl -n monitoring rollout restart deployment/prometheus" is
+  # required (deliberately not automated, to avoid losing Prometheus' in-memory state on every
+  # dashboard update) - same caveat as studylife's own deploy/kustomization.yaml.
+  - ../../monitoring/01-prometheus.yaml
+  # Grafana dashboard contents (no placeholders, see their file header) - so "tested once,
+  # automatically to prod" also applies to dashboard changes, not just image tags.
+  - ../../monitoring/05-grafana-dashboards.yaml
+  # >250KB of vendored community dashboards - deliberately ONLY here (server-side apply), never
+  # via bootstrap-cluster.ps1's normal apply path (client-side 256KiB annotation limit).
+  - ../../monitoring/06-grafana-community-dashboards.yaml
+  # Alert rules + notification policy (no placeholders) - the Telegram contact point itself is
+  # deliberately NOT managed here (manual UI setup, see file header).
+  - ../../monitoring/07-grafana-alerting.yaml

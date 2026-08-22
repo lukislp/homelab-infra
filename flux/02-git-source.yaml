@@ -1,0 +1,15 @@
+# Points Flux at the homelab-infra repo itself (public GitHub repo). Reuses studylife-git-auth
+# (see sealed-secrets/flux-system/) - the same credential every other GitRepository on this
+# cluster reuses, not actually studylife-specific despite the name.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: homelab-infra
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/lukislp/homelab-infra.git
+  ref:
+    branch: main
+  secretRef:
+    name: studylife-git-auth

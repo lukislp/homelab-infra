@@ -1,0 +1,23 @@
+# Applies EXCLUSIVELY flux/infra-deploy/ (see there) to the cluster - same scoping decision as
+# studylife's own k8s/flux/05-kustomization.yaml. prune: true is unproblematic here, since the
+# scope of effect is limited exactly to Prometheus + the 3 Grafana dashboard/alerting objects
+# (Flux's inventory tracking only concerns what THIS Kustomization itself has applied).
+#
+# Adopts objects previously owned by studylife-deploy (see studylife/k8s/flux/deploy/
+# kustomization.yaml) - this Kustomization must reach Ready here FIRST, before the same 4
+# resource lines are removed from studylife-deploy's list, otherwise there's a window with
+# nothing reconciling/re-creating them.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-deploy
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: homelab-infra
+  path: ./flux/infra-deploy
+  prune: true
+  wait: true
+  timeout: 3m
