@@ -276,6 +276,38 @@ spec:
           from: Selector
           selector:
             matchLabels: { kubernetes.io/metadata.name: studylife-mcp }
+    # UnifiProtectDashboard (separate repo/namespace) - same -heim/-public pair as every other
+    # service on this Gateway. Backfilled after this repo's initial import from studylife/k8s
+    # was found to predate these two listeners (studylife/k8s/07c-gateway.yaml already had them,
+    # from PR lukislp/studylife#43) - applying this file wiped them from the live Gateway object
+    # (HTTPRoute status: NotAllowedByListeners) until restored live via kubectl patch --type=json
+    # and backfilled here. Matches the live object exactly - kubectl diff clean.
+    - name: unifidashboard-heim
+      hostname: unifidashboard.heim.lan
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: unifidashboard-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: unifiprotectdashboard }
+    - name: unifidashboard-public
+      hostname: unifidashboard.lukas2311-homelab.com
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: unifidashboard-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: unifiprotectdashboard }
     # homelab-autodoc (separate repo/namespace) - same -heim/-public pair as every other service.
     - name: autodoc-heim
       hostname: autodoc.heim.lan
