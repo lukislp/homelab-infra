@@ -111,7 +111,10 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchLabels: { kubernetes.io/metadata.name: studylife-scale }
+            # Uptime Kuma moved to the monitoring namespace (was studylife-scale), see
+            # monitoring/10-uptime-kuma.yaml - it now monitors the whole cluster, not just
+            # studylife, so it belongs with the rest of the shared monitoring stack.
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
     - name: uptimekuma-public
       hostname: uptimekuma.lukas2311-homelab.com
       port: 443
@@ -124,7 +127,7 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchLabels: { kubernetes.io/metadata.name: studylife-scale }
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
     - name: grafana-heim
       hostname: grafana.heim.lan
       port: 443

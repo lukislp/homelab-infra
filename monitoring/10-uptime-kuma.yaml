@@ -1,0 +1,99 @@
+# Moved here from studylife/k8s/09-uptime-kuma.yaml as part of the cluster-wide-infra split -
+# Uptime Kuma monitors HTTP/TCP endpoints across the WHOLE cluster (studylife-web, grafana,
+# piwatch, other apps' hostnames - see each app's own monitor config in its UI), not just
+# studylife, so it belongs with the rest of the shared monitoring stack rather than in any single
+# app's namespace. Namespace changed studylife-scale -> monitoring to match every other
+# monitoring-stack object; PVC data was migrated (tar backup/restore of /app/data, verified byte
+# counts match) rather than recreated, so all existing monitors/history/settings carried over.
+#
+# Lightweight outage notification, independent of the metrics pipeline (Grafana/Prometheus) -
+# pure HTTP healthcheck monitoring + push/email/webhook on outage. Needs NO external account, so
+# it's usable standalone.
+#
+# Backend TLS: Uptime Kuma natively supports its own TLS via UPTIME_KUMA_SSL_KEY/
+# UPTIME_KUMA_SSL_CERT (no reverse-proxy sidecar needed, see
+# https://github.com/louislam/uptime-kuma/wiki/Environment-Variables) - this switches the single
+# port 3001 entirely to HTTPS, so the readiness probe and Gateway backend protocol are switched
+# along with it.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: uptime-kuma-backend-tls
+  namespace: monitoring
+spec:
+  secretName: uptime-kuma-backend-tls
+  dnsNames:
+    - uptime-kuma.monitoring.svc.cluster.local
+    - uptime-kuma
+  issuerRef:
+    name: studylife-internal-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uptime-kuma-data
+  namespace: monitoring
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 512Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uptime-kuma
+  namespace: monitoring
+spec:
+  replicas: 1 # deliberately just 1 - pure observer, no app user data, no HA need
+  strategy:
+    type: Recreate # single instance with an RWO volume, like Postgres before the CNPG switch
+  selector:
+    matchLabels: { app: uptime-kuma }
+  template:
+    metadata:
+      labels: { app: uptime-kuma }
+    spec:
+      # Uptime Kuma doesn't need Kubernetes API access (only checks HTTP/TCP endpoints).
+      automountServiceAccountToken: false
+      containers:
+        - name: uptime-kuma
+          image: louislam/uptime-kuma:2
+          env:
+            - { name: UPTIME_KUMA_SSL_KEY, value: /etc/uptime-kuma-backend-tls/tls.key }
+            - { name: UPTIME_KUMA_SSL_CERT, value: /etc/uptime-kuma-backend-tls/tls.crt }
+            # v2.3.0+ on Raspberry Pi: SQLite locking issues are possible, officially recommended
+            # workaround per the upstream wiki (https://github.com/louislam/uptime-kuma/wiki/Docker-Tags).
+            - { name: UPTIME_KUMA_SQLITE_SINGLE_CONNECTION, value: "true" }
+          ports:
+            - containerPort: 3001
+          resources:
+            requests: { cpu: 50m, memory: 100Mi }
+            limits: { cpu: 200m, memory: 200Mi }
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: backend-tls
+              mountPath: /etc/uptime-kuma-backend-tls
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /, port: 3001, scheme: HTTPS }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: uptime-kuma-data }
+        - name: backend-tls
+          secret: { secretName: uptime-kuma-backend-tls }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: uptime-kuma
+  namespace: monitoring
+spec:
+  selector: { app: uptime-kuma }
+  ports:
+    - port: 80
+      targetPort: 3001

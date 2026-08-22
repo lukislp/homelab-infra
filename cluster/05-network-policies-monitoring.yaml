@@ -29,10 +29,10 @@ spec:
   ingress:
     - from:
         - podSelector: { matchLabels: { app: prometheus } } # Prometheus' own "grafana" scrape job
-        # Uptime Kuma (studylife-scale) may also check Grafana internally, analogous to
-        # studylife-web (see studylife's allow-ingress-to-web) - harmless if no monitor exists for it (yet).
-        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
-          podSelector: { matchLabels: { app: uptime-kuma } }
+        # Uptime Kuma (same namespace since the uptime-kuma move, see monitoring/
+        # 10-uptime-kuma.yaml) also checks Grafana internally, analogous to studylife-web (see
+        # studylife's allow-ingress-to-web).
+        - podSelector: { matchLabels: { app: uptime-kuma } }
       ports:
         - { protocol: TCP, port: 3000 }
 ---
@@ -136,10 +136,26 @@ spec:
   policyTypes: ["Ingress"]
   ingress:
     - from:
-        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
-          podSelector: { matchLabels: { app: uptime-kuma } }
+        # Same-namespace since the uptime-kuma move, see monitoring/10-uptime-kuma.yaml.
+        - podSelector: { matchLabels: { app: uptime-kuma } }
       ports:
         - { protocol: TCP, port: 8000 }
+---
+# Moved here from studylife/k8s/12-network-policies.yaml (allow-nginx-gateway-to-uptime-kuma) -
+# uptime-kuma itself moved to this namespace, see monitoring/10-uptime-kuma.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-uptime-kuma
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: uptime-kuma } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: nginx-gateway } }
+      ports:
+        - { protocol: TCP, port: 3001 }
 ---
 # The piwatch deployment queries each node-agent pod for its hardware metrics (see the piwatch
 # repo, PIWATCH_AGENT_SERVICE) - without this rule, the dashboard would stay empty for all Pi

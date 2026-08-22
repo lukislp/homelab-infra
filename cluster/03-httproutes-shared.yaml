@@ -12,6 +12,60 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
+  name: uptime-kuma
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: studylife-gateway
+      namespace: nginx-gateway
+  hostnames:
+    - uptimekuma.heim.lan
+    - uptimekuma.lukas2311-homelab.com
+  rules:
+    - backendRefs:
+        - name: uptime-kuma
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: uptime-kuma-backend-tls
+  namespace: monitoring
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: uptime-kuma
+  validation:
+    caCertificateRefs:
+      - group: ""
+        kind: Secret
+        name: uptime-kuma-backend-tls
+    hostname: uptime-kuma.monitoring.svc.cluster.local
+---
+apiVersion: gateway.nginx.org/v1alpha1
+kind: RateLimitPolicy
+metadata:
+  name: uptime-kuma-rate-limit
+  namespace: monitoring
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: uptime-kuma
+  rateLimit:
+    local:
+      rules:
+        - zoneSize: 10m
+          key: "$binary_remote_addr"
+          rate: 20r/s
+          burst: 200
+          noDelay: true
+    rejectCode: 503
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
   name: grafana
   namespace: monitoring
 spec:
