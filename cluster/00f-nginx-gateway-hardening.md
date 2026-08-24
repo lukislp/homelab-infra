@@ -23,8 +23,22 @@ kubectl -n nginx-gateway patch deployment nginx-gateway --type=strategic -p '{
 Deliberately NOT patched: the data-plane deployment (`studylife-gateway-nginx`) is
 provisioned and continuously reconciled by the control plane - direct patches get reverted.
 Its resources and readiness probe already come through the `NginxProxy` resources; the CRD
-exposes no livenessProbe field in v2.6, so the data plane's missing liveness stays as an
-accepted finding until upstream adds one.
+exposes no livenessProbe field in v2.6, so the data plane's missing liveness stays accepted
+until upstream adds one. That acceptance is machine-readable for homelab-autodoc through an
+annotation the control plane itself stamps onto the deployment, via the NginxProxy's
+`deployment.patches` (the supported way to reach the reconciled deployment - it survives
+control-plane reconciles, unlike a direct patch):
+
+```bash
+kubectl -n nginx-gateway patch nginxproxy studylife-gateway-config --type=merge -p '{
+  "spec": {"kubernetes": {"deployment": {"patches": [
+    {"type": "StrategicMerge",
+     "value": {"metadata": {"annotations": {
+       "autodoc.homelab/accept-missing-probes":
+         "NginxProxy exposes no livenessProbe field for the data plane in v2.6; readiness is configured and gates traffic - a wedged worker not being auto-restarted is the accepted residual risk"
+     }}}}
+  ]}}}}'
+```
 
 The NetworkPolicies live in `08-network-policies-nginx-gateway.yaml` - the data plane's 443
 must accept all sources (LAN clients arrive via the MetalLB IP), the control plane's 8443
