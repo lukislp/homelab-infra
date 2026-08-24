@@ -23,6 +23,15 @@ initContainers:
 resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { cpu: 500m, memory: 512Mi }
+# The server needs no root (verified live: BSL Available + backup run under this
+# context) - same hardening baseline as every app in this cluster.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities: { drop: ["ALL"] }
+  seccompProfile: { type: RuntimeDefault }
 credentials:
   useSecret: true
   existingSecret: velero-r2-credentials
@@ -51,6 +60,21 @@ nodeAgent:
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }
+  # Root is the node-agent's job description: kopia file-system backups read
+  # every pod's volume files under /var/lib/kubelet/pods (chart default
+  # runAsUser 0). Privilege ESCALATION it still doesn't need. No probes: the
+  # node-agent exposes no health endpoint and the chart offers no probe
+  # fields. Both acknowledged for autodoc's findings engine below.
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    seccompProfile: { type: RuntimeDefault }
+  annotations:
+    autodoc.homelab/accept-run-as-root-allowed: >-
+      kopia file-system backups read every pod's volume files under
+      /var/lib/kubelet/pods - root by necessity
+    autodoc.homelab/accept-missing-probes: >-
+      the node-agent exposes no health endpoint and the chart offers no
+      probe fields
 metrics:
   enabled: true
 schedules:
