@@ -154,32 +154,6 @@ spec:
           from: Selector
           selector:
             matchLabels: { kubernetes.io/metadata.name: monitoring }
-    - name: studylife-download-heim
-      hostname: studylife-download.heim.lan
-      port: 443
-      protocol: HTTPS
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - { kind: Secret, name: studylife-download-tls }
-      allowedRoutes:
-        namespaces:
-          from: Selector
-          selector:
-            matchLabels: { kubernetes.io/metadata.name: studylife-scale }
-    - name: studylife-download-public
-      hostname: studylife-download.lukas2311-homelab.com
-      port: 443
-      protocol: HTTPS
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - { kind: Secret, name: studylife-download-tls }
-      allowedRoutes:
-        namespaces:
-          from: Selector
-          selector:
-            matchLabels: { kubernetes.io/metadata.name: studylife-scale }
     - name: piwatch-heim
       hostname: piwatch.heim.lan
       port: 443
