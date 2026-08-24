@@ -407,6 +407,14 @@ kind: Deployment
 metadata:
   name: prometheus
   namespace: monitoring
+  annotations:
+    # Read by homelab-autodoc's no-backup finding: this volume is deliberately
+    # NOT in the Velero nightly backup - observability data, accepted loss
+    # (documented in homelab-infra cluster/00g-velero-backups.md).
+    autodoc.homelab/accept-no-backup: >-
+      TSDB metrics history is
+      observability data with accepted loss - deliberately excluded from the
+      Velero nightly backup (see 00g-velero-backups.md)
 spec:
   replicas: 1 # pure observer, no HA need for a learning project of this size
   strategy:
