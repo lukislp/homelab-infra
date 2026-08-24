@@ -1,0 +1,47 @@
+# metallb-system namespace: same default-deny ingress strategy as cert-manager
+# (06-network-policies-cert-manager.yaml). One honest caveat: the speaker runs on the host
+# network, where NetworkPolicies have no practical effect (its traffic appears as node IPs) -
+# the policies below genuinely protect the controller, and merely formally select the speaker.
+# Egress deliberately stays open, same trade-off as everywhere else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: metallb-system
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+# The controller validates every MetalLB resource write (IPAddressPool, L2Advertisement, ...)
+# through its webhook on 9443. The apiserver calls it from node IPs no selector can match -
+# the port must accept all sources or every MetalLB config apply times out (same reasoning as
+# cert-manager's webhook policy).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-to-webhook
+  namespace: metallb-system
+spec:
+  podSelector: { matchLabels: { component: controller } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - ports:
+        - { protocol: TCP, port: 9443 }
+---
+# Prometheus' "metallb" scrape job reads the controller's :7472 by pod IP; without this
+# allow, default-deny-ingress above would silently break it. The speakers' metrics are
+# scraped via node IPs (host network) and are not affected by policies either way.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-metrics-scrape
+  namespace: metallb-system
+spec:
+  podSelector: { matchLabels: { component: controller } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+          podSelector: { matchLabels: { app: prometheus } }
+      ports:
+        - { protocol: TCP, port: 7472 }
