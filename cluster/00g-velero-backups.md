@@ -57,6 +57,9 @@ Volumes join the nightly 03:00 run (TTL 168h) via pod annotation
 | autodoc-server (homelab-autodoc) | data, config | files only appended/rewritten atomically |
 | homelab-hub (homelab-hub) | data | small JSON store |
 | qdrant (studylife-ai) | storage | crash-consistent; embeddings re-derivable at worst |
+| studylife-ai | data | agent checkpoints; crash-consistent, accepted |
+| studylife-mcp | data | oauth.db (MCP client registrations/tokens) |
+| unifiprotectdashboard | data | dashboard.db + enc.key + vapid-keys.json (irreplaceable) |
 
 A second schedule, `velero-cluster-state` (03:30, resources only, no volumes), preserves
 the hand-curated Kubernetes state nothing else holds: the sealed-secrets private keys
@@ -69,9 +72,16 @@ Drill performed 2026-08-24: the two sealed-secrets keys restored via exactly tha
 path into a scratch namespace came back byte-identical to the live ones (md5-verified).
 
 Deliberately NOT backed up: prometheus TSDB + loki logs (observability data, accepted
-loss), Postgres (CNPG barman owns it), redis (cache, rebuilds itself), and the autodoc
+loss), Postgres (CNPG barman owns it), redis (cache, rebuilds itself), the autodoc
 collector-token PVC - a file-system backup needs a running pod, and the collector pod
-lives for about a minute a night; losing the token costs one device-grant approval click.
+lives for about a minute a night; losing the token costs one device-grant approval click -
+and piwatch's NVMe history (hostPath: Velero's file-system backup does not support
+hostPath volumes at all; trend data, accepted, would need a move to a PVC to change).
+
+Hard-learned rule: an opt-in annotation only works if the pod's NAMESPACE is in the
+nightly-pvc schedule's includedNamespaces list - the first rollout of studylife-mcp and
+unifiprotectdashboard shipped annotations without the namespaces, and nothing happened,
+silently. When a new app opts in, extend the schedule list in the same change.
 
 ## Restore
 
