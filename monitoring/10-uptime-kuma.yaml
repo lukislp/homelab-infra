@@ -57,6 +57,18 @@ spec:
     spec:
       # Uptime Kuma doesn't need Kubernetes API access (only checks HTTP/TCP endpoints).
       automountServiceAccountToken: false
+      initContainers:
+        # The PVC's data was written by the image's root era; chown on every
+        # start (idempotent, a single SQLite db) so the non-root app below
+        # can keep writing it - same migration pattern as autodoc-server.
+        - name: fix-data-ownership
+          image: busybox:1.36.1
+          command: ["chown", "-R", "1000:1000", "/app/data"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
       containers:
         - name: uptime-kuma
           image: louislam/uptime-kuma:2
@@ -77,6 +89,19 @@ spec:
             - name: backend-tls
               mountPath: /etc/uptime-kuma-backend-tls
               readOnly: true
+          # The image defaults to root but the app is a plain Node process -
+          # it runs fine as any UID once /app/data belongs to it (see the
+          # initContainer above).
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /, port: 3001, scheme: HTTPS }
+            initialDelaySeconds: 30
+            periodSeconds: 15
           readinessProbe:
             httpGet: { path: /, port: 3001, scheme: HTTPS }
             initialDelaySeconds: 10

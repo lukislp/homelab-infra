@@ -25,6 +25,23 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 100m, memory: 64Mi }
+          # Declares what the image already does (runs as nobody/65534) so the
+          # posture is enforced, not incidental - no data-ownership migration
+          # needed, the PVC files were always written by this UID.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /, port: 9100 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /, port: 9100 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
           volumeMounts:
             - name: rootfs
               mountPath: /host

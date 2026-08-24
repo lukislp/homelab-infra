@@ -69,6 +69,24 @@ spec:
             - --resources=pods,nodes,services,persistentvolumeclaims,namespaces,deployments,replicasets,statefulsets,daemonsets,poddisruptionbudgets,endpointslices
           ports:
             - containerPort: 8080
+            - containerPort: 8081 # telemetry (self-health, serves /readyz)
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { cpu: 200m, memory: 128Mi }
+          # Declares what the image already does (runs as nobody/65534) so the
+          # posture is enforced, not incidental - no data-ownership migration
+          # needed, the PVC files were always written by this UID.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /livez, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 10

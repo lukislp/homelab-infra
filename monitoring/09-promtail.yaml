@@ -78,6 +78,22 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 64Mi }
             limits: { cpu: 100m, memory: 128Mi }
+          # Root is required here - /var/log/pods on the host is only readable
+          # by root, so runAsNonRoot is not an option (the one accepted
+          # run-as-root finding in this namespace). Everything else is still
+          # dropped.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /ready, port: 9080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /ready, port: 9080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
           volumeMounts:
             - { name: config, mountPath: /etc/promtail }
             - { name: pods-logs, mountPath: /var/log/pods, readOnly: true }

@@ -429,6 +429,19 @@ spec:
               mountPath: /etc/prometheus
             - name: data
               mountPath: /prometheus
+          # Declares what the image already does (runs as nobody/65534) so the
+          # posture is enforced, not incidental - no data-ownership migration
+          # needed, the PVC files were always written by this UID.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /-/healthy, port: 9090 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
           readinessProbe:
             httpGet: { path: /-/ready, port: 9090 }
             initialDelaySeconds: 10
