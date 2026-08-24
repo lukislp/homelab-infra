@@ -36,6 +36,19 @@ credentials:
   useSecret: true
   existingSecret: velero-r2-credentials
 configuration:
+  # The hardening above runs the server as runAsUser 65534 ("nobody", HOME=/nonexistent
+  # in the image's passwd). The server itself doesn't care, but the kopia repo
+  # MAINTENANCE jobs Velero spawns hourly inherit this env and crash trying to write
+  # kopia's config below $HOME ("mkdir /nonexistent: permission denied") - observed
+  # live as a steady stream of Error pods, one per BackupRepository. Maintenance
+  # jobs inherit the server container's env and mounts, and /scratch is the chart's
+  # own emptyDir (world-writable), so pointing HOME there fixes the jobs without
+  # loosening any securityContext. Backups themselves were never affected - the
+  # actual kopia uploads run in the node-agent - but without maintenance the repos
+  # would never prune expired data.
+  extraEnvVars:
+    - name: HOME
+      value: /scratch
   backupStorageLocation:
     - name: default
       provider: aws
