@@ -67,6 +67,12 @@ schedules:
         - homelab-autodoc
         - homelab-hub
         - studylife-ai
+        # The two below were MISSING when their pods got their opt-in annotations - an
+        # annotation outside includedNamespaces silently does nothing (found in review,
+        # verified with a targeted backup afterwards). If another app opts in, its
+        # namespace must be added here too.
+        - studylife-mcp
+        - unifiprotectdashboard
       snapshotVolumes: false
       # Volumes join the backup by OPT-IN pod annotation only
       # (backup.velero.io/backup-volumes: <volume-name>, set in each app's own repo) -
@@ -93,6 +99,11 @@ schedules:
         - metallb-system
         - tailscale
         - flux-system
+        # studylife-scale: hand-created secrets (studylife-apns - the Apple push key -,
+        # dataprotection keys, the PG app secret, the shared R2 token) plus the CNPG
+        # Cluster/Pooler/ScheduledBackup CRs. Volumes stay out (CNPG barman owns the data,
+        # redis rebuilds itself); the RESOURCES were backed up nowhere until now.
+        - studylife-scale
       includeClusterResources: true
       snapshotVolumes: false
       defaultVolumesToFsBackup: false
