@@ -58,8 +58,20 @@ Volumes join the nightly 03:00 run (TTL 168h) via pod annotation
 | homelab-hub (homelab-hub) | data | small JSON store |
 | qdrant (studylife-ai) | storage | crash-consistent; embeddings re-derivable at worst |
 
+A second schedule, `velero-cluster-state` (03:30, resources only, no volumes), preserves
+the hand-curated Kubernetes state nothing else holds: the sealed-secrets private keys
+(without them every SealedSecret in every repo is undecryptable forever), the
+studylife-internal-ca key, the surgically-patched studylife-gateway listener list,
+NginxProxy/ProxyClass/MetalLB config, tailscale operator state, flux auth secrets.
+Restore of a single object goes through a Restore CR with `includedResources` +
+`labelSelector`/resource filters - never blanket-restore kube-system onto a live cluster.
+Drill performed 2026-08-24: the two sealed-secrets keys restored via exactly that filtered
+path into a scratch namespace came back byte-identical to the live ones (md5-verified).
+
 Deliberately NOT backed up: prometheus TSDB + loki logs (observability data, accepted
-loss), Postgres (CNPG barman owns it).
+loss), Postgres (CNPG barman owns it), redis (cache, rebuilds itself), and the autodoc
+collector-token PVC - a file-system backup needs a running pod, and the collector pod
+lives for about a minute a night; losing the token costs one device-grant approval click.
 
 ## Restore
 

@@ -74,3 +74,25 @@ schedules:
       # observability data we accept losing, and an opt-out model would silently swallow
       # every future PVC into the nightly upload.
       defaultVolumesToFsBackup: false
+  # Resources-only backup of the hand-curated cluster state nothing else preserves:
+  # the sealed-secrets private keys (kube-system - without them every SealedSecret in
+  # every repo is undecryptable forever), the studylife-internal-ca key (cert-manager),
+  # the surgically-patched studylife-gateway listener list, NginxProxy/ProxyClass/
+  # MetalLB config, tailscale operator state, and the flux auth secrets. Kilobytes per
+  # night; secrets land in the kopia repo protected exactly as well as the R2 token -
+  # the same trust level the CNPG WAL archive already has.
+  cluster-state:
+    disabled: false
+    schedule: "30 3 * * *"
+    template:
+      ttl: 168h
+      includedNamespaces:
+        - kube-system
+        - cert-manager
+        - nginx-gateway
+        - metallb-system
+        - tailscale
+        - flux-system
+      includeClusterResources: true
+      snapshotVolumes: false
+      defaultVolumesToFsBackup: false
