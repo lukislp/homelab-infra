@@ -579,3 +579,26 @@ data:
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [93600] } }] }
             labels: { severity: warning }
             annotations: { summary: "Der naechtliche autodoc-Collector-Lauf (02:00) hatte seit ueber 26 Stunden keinen Erfolg - die Doku-Site zeigt veraltete Daten (Freshness-Stempel prueft nur, wer aktiv hinschaut)." }
+          # Same staleness pattern as the collector rule above, for the Velero nightly PVC
+          # backup (03:00, cluster/10-velero-values.yaml). Metric verified live after the
+          # first manual backup run; "or vector(0)" again turns a missing metric (Velero
+          # down, never succeeded) into infinitely-stale instead of NoData-silence.
+          - uid: alert-velero-backup-stale
+            title: "Velero-PVC-Backup ueberfaellig (letzter Erfolg vor mehr als 26h)"
+            condition: C
+            for: 15m
+            data:
+              - refId: A
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: prometheus
+                model: { refId: A, expr: 'time() - (max(velero_backup_last_successful_timestamp{schedule="velero-nightly-pvc"}) or vector(0))' }
+              - refId: B
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: B, type: reduce, expression: A, reducer: last }
+              - refId: C
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [93600] } }] }
+            labels: { severity: warning }
+            annotations: { summary: "Das naechtliche Velero-Backup der App-PVCs (03:00 nach R2) hatte seit ueber 26 Stunden keinen Erfolg - uptime-kuma/grafana/autodoc/homelab-hub/qdrant-Daten laufen ohne aktuellen Offsite-Stand." }

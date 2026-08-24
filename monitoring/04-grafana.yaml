@@ -84,6 +84,13 @@ spec:
   template:
     metadata:
       labels: { app: grafana }
+      annotations:
+        # Velero nightly PVC backup: dashboards/datasources are provisioned from Git, but
+        # grafana.db also holds the manually-configured Telegram contact point and the
+        # notification policy - the two things a rebuild can't reproduce. No consistent-copy
+        # pre-hook here (the grafana image ships no sqlite3 CLI); accepted: 7 independent
+        # nightly states, worst case is falling back one night (00g-velero-backups.md).
+        backup.velero.io/backup-volumes: data
     spec:
       # Grafana's image runs as UID 472 and needs write access to its own data directory - a
       # fresh PVC otherwise belongs to root, which the grafana user can't write to.
