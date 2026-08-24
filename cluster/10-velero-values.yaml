@@ -1,0 +1,76 @@
+# Velero: nightly application PVC backups to Cloudflare R2 - the "buy" decision after
+# evaluating a self-built scale-down/tar orchestrator (see 00g-velero-backups.md for the
+# full trade-off write-up and the restore drill). Installed by hand via helm, like the
+# tailscale operator - NOT Flux-managed (no helm-controller in this cluster by design):
+#
+#   helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
+#   helm upgrade --install velero vmware-tanzu/velero -n velero -f cluster/10-velero-values.yaml
+#
+# Credentials: the SAME R2 API token CNPG's barman uses (one token = one revocation kills
+# every offsite backup at once, deliberately), mirrored into the velero namespace as secret
+# "velero-r2-credentials" with the aws-credentials-file format the plugin expects - creation
+# and rotation commands in 00g-velero-backups.md.
+image:
+  repository: velero/velero
+  tag: v1.18.1 # arm64 verified via docker manifest inspect before install
+initContainers:
+  # "AWS" plugin = velero's generic S3-API driver; R2 is S3-compatible. No AWS involved.
+  - name: velero-plugin-for-aws
+    image: velero/velero-plugin-for-aws:v1.14.0 # arm64 verified too
+    volumeMounts:
+      - name: plugins
+        mountPath: /target
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+credentials:
+  useSecret: true
+  existingSecret: velero-r2-credentials
+configuration:
+  backupStorageLocation:
+    - name: default
+      provider: aws
+      bucket: studylifebackup
+      # Own prefix next to barman's cluster folders - restic/kopia data can never collide
+      # with the Postgres WAL archive.
+      prefix: velero
+      config:
+        region: auto
+        s3ForcePathStyle: "true"
+        s3Url: https://44ffca74c2d2f27b33389c8f54f95edf.r2.cloudflarestorage.com
+        # R2 rejects the AWS SDK's newer trailer checksums - must be explicitly empty.
+        checksumAlgorithm: ""
+  # local-path has no CSI snapshot support - file-system backup via the node-agent (kopia,
+  # compressed + deduplicated) is the whole point of this setup, volume snapshots stay off.
+  volumeSnapshotLocation: []
+  defaultBackupStorageLocation: default
+  defaultVolumesToFsBackup: false
+snapshotsEnabled: false
+deployNodeAgent: true
+nodeAgent:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+metrics:
+  enabled: true
+schedules:
+  # Nightly at 03:00 - after the 02:00 autodoc collector push, before Postgres' own 03:00
+  # barman run finishes competing for bandwidth is irrelevant at these sizes. 168h TTL
+  # mirrors CNPG's 7-day retention; Velero prunes expired backups itself.
+  nightly-pvc:
+    disabled: false
+    schedule: "0 3 * * *"
+    template:
+      ttl: 168h
+      includedNamespaces:
+        - monitoring
+        - homelab-autodoc
+        - homelab-hub
+        - studylife-ai
+      snapshotVolumes: false
+      # Volumes join the backup by OPT-IN pod annotation only
+      # (backup.velero.io/backup-volumes: <volume-name>, set in each app's own repo) -
+      # deliberate: monitoring also holds prometheus' TSDB and loki's log store, which are
+      # observability data we accept losing, and an opt-out model would silently swallow
+      # every future PVC into the nightly upload.
+      defaultVolumesToFsBackup: false

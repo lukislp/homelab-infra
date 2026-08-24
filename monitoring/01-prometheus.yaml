@@ -287,6 +287,20 @@ data:
           - source_labels: [__meta_kubernetes_pod_ip]
             target_label: __address__
             replacement: "${1}:8080"
+      # Velero (cluster/10-velero-values.yaml) - the backup-overdue alert in
+      # 07-grafana-alerting.yaml reads velero_backup_last_successful_timestamp from here.
+      # Server pod only (:8085); the node-agent DaemonSet exposes no metrics endpoint.
+      - job_name: velero
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [velero] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            regex: velero
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:8085"
       - job_name: prometheus
         kubernetes_sd_configs:
           - role: pod

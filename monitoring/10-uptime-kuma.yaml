@@ -54,6 +54,15 @@ spec:
   template:
     metadata:
       labels: { app: uptime-kuma }
+      annotations:
+        # Velero nightly PVC backup (cluster/10-velero-values.yaml): opt-in for the data
+        # volume, plus a pre-hook that writes a consistent SQLite snapshot INTO the volume
+        # right before the file-system backup - kuma.db is in WAL mode and written
+        # constantly, so the raw file alone could be torn mid-write. Restore preference:
+        # kuma.db.velero-snapshot (see 00g-velero-backups.md).
+        backup.velero.io/backup-volumes: data
+        pre.hook.backup.velero.io/command: '["sqlite3", "/app/data/kuma.db", ".backup ''/app/data/kuma.db.velero-snapshot''"]'
+        pre.hook.backup.velero.io/timeout: 60s
     spec:
       # Uptime Kuma doesn't need Kubernetes API access (only checks HTTP/TCP endpoints).
       automountServiceAccountToken: false
