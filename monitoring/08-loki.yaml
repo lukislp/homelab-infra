@@ -80,6 +80,19 @@ spec:
           volumeMounts:
             - { name: config, mountPath: /etc/loki }
             - { name: data, mountPath: /loki }
+          # Declares what the image already does (runs as loki/10001) so the
+          # posture is enforced, not incidental - no data-ownership migration
+          # needed, the PVC files were always written by this UID.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /ready, port: 3100 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
           readinessProbe:
             httpGet: { path: /ready, port: 3100 }
             initialDelaySeconds: 10

@@ -119,6 +119,19 @@ spec:
             - { name: dashboard-studylife-mcp, mountPath: /etc/grafana/provisioning/dashboard-json/studylife-mcp }
             - { name: alerting, mountPath: /etc/grafana/provisioning/alerting }
             - { name: backend-tls, mountPath: /etc/grafana-backend-tls, readOnly: true }
+          # Declares what the image already does (runs as grafana/472) so the
+          # posture is enforced, not incidental - no data-ownership migration
+          # needed, the PVC files were always written by this UID.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 472
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3000, scheme: HTTPS }
+            initialDelaySeconds: 30
+            periodSeconds: 15
           readinessProbe:
             httpGet: { path: /api/health, port: 3000, scheme: HTTPS }
             initialDelaySeconds: 10
