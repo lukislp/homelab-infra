@@ -48,6 +48,15 @@ rules:
   - apiGroups: ["cert-manager.io"]
     resources: ["certificates"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Added for homelab-autodoc-deploy: its collector CronJob joins the Flux-managed subset so
+  # image automation can bump server AND collector in lockstep - the manual collector bump
+  # (documented in that repo's k8s/README.md) repeatedly lagged behind the Flux-automated
+  # server, leaving mismatched versions between bumps. Only "cronjobs" itself: Flux's health
+  # check (kstatus) treats a CronJob as Current without inspecting its Jobs, so no batch/jobs
+  # read access is needed.
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles", "clusterrolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
