@@ -4,7 +4,9 @@ MetalLB is installed from the upstream static manifest (v0.14.9), which ships co
 speaker without resource requests/limits - flagged by homelab-autodoc's findings page.
 Upstream security posture is already solid (privilege escalation off, capabilities dropped,
 read-only root filesystem, non-root controller); the speaker's root is required by design
-(host network, NET_RAW for ARP/NDP announcements) and stays as an accepted finding.
+(host network, NET_RAW for ARP/NDP announcements) and is acknowledged as an accepted
+finding via the annotation below - autodoc lists it under "Accepted Findings" with that
+reason instead of as an open item.
 
 Like cert-manager's patches (00d-cert-manager-hardening.md): **re-apply after every MetalLB
 upgrade**, a fresh upstream manifest resets them.
@@ -23,6 +25,9 @@ kubectl -n metallb-system patch daemonset speaker --type=strategic -p '{
     "resources": {"requests": {"cpu": "10m", "memory": "64Mi"},
                   "limits": {"cpu": "200m", "memory": "128Mi"}}
   }]}}}}'
+
+kubectl -n metallb-system annotate daemonset speaker --overwrite \
+  autodoc.homelab/accept-run-as-root-allowed='upstream-pinned by design: L2 announcement needs raw ARP/NDP sockets on the host network and the manifest ships the speaker without runAsNonRoot'
 ```
 
 The NetworkPolicies live in `07-network-policies-metallb.yaml` (applied with the rest of

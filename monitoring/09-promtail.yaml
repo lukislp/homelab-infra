@@ -60,6 +60,12 @@ kind: DaemonSet
 metadata:
   name: promtail
   namespace: monitoring
+  annotations:
+    # Read by homelab-autodoc's findings engine: acknowledges the root
+    # finding with its reason instead of leaving it listed as open.
+    autodoc.homelab/accept-run-as-root-allowed: >-
+      tails every pod's logs under /var/log/pods, which the kubelet
+      writes root-readable only
 spec:
   selector:
     matchLabels: { app: promtail }
