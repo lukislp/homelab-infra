@@ -530,3 +530,52 @@ data:
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: warning }
             annotations: { summary: "Kein uptime-kuma-Pod laeuft mehr - externe Erreichbarkeitspruefung UND Telegram-Benachrichtigung fallen beide gleichzeitig aus, ohne dass irgendetwas anderes das meldet." }
+          # autodoc was the last app without a reachability rule - and the nightly collector
+          # push can fail silently (the docs just go stale). Both metrics verified live before
+          # adding: kube_deployment_status_replicas_available existed already, jobs/cronjobs
+          # were added to kube-state-metrics' restricted --resources list for the second rule
+          # (03-kube-state-metrics.yaml).
+          - uid: alert-autodoc-down
+            title: "homelab-autodoc nicht erreichbar"
+            condition: C
+            for: 2m
+            data:
+              - refId: A
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: prometheus
+                model: { refId: A, expr: 'min(kube_deployment_status_replicas_available{namespace="homelab-autodoc",deployment="autodoc-server"}) or vector(0)' }
+              - refId: B
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: B, type: reduce, expression: A, reducer: last }
+              - refId: C
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
+            labels: { severity: warning }
+            annotations: { summary: "Kein autodoc-server-Pod laeuft mehr - die Cluster-Doku (autodoc.lukas2311-homelab.com) ist weg und naechtliche Collector-Pushes laufen ins Leere." }
+          # Fires when the last SUCCESSFUL collector job finished more than 26h ago (nightly
+          # schedule is 02:00, so >26h means at least one full run was missed or failed).
+          # kube_job_status_completion_time only exists for succeeded jobs, and the CronJob
+          # keeps 3 successful jobs of history - so the metric is always present in healthy
+          # operation. The "or vector(0)" makes a MISSING metric (collector never succeeded,
+          # kube-state-metrics broken) count as infinitely stale instead of NoData-silence.
+          - uid: alert-autodoc-collector-stale
+            title: "autodoc-Collector-Push ueberfaellig (letzter Erfolg vor mehr als 26h)"
+            condition: C
+            for: 15m
+            data:
+              - refId: A
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: prometheus
+                model: { refId: A, expr: 'time() - (max(kube_job_status_completion_time{namespace="homelab-autodoc",job_name=~"autodoc-collector.*"}) or vector(0))' }
+              - refId: B
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: B, type: reduce, expression: A, reducer: last }
+              - refId: C
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [93600] } }] }
+            labels: { severity: warning }
+            annotations: { summary: "Der naechtliche autodoc-Collector-Lauf (02:00) hatte seit ueber 26 Stunden keinen Erfolg - die Doku-Site zeigt veraltete Daten (Freshness-Stempel prueft nur, wer aktiv hinschaut)." }

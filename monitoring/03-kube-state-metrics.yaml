@@ -21,6 +21,12 @@ rules:
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
     verbs: ["list", "watch"]
+  # Added for the autodoc-collector staleness alert (07-grafana-alerting.yaml):
+  # kube_job_status_completion_time is the only signal for "the nightly collector push
+  # succeeded recently" - jobs/cronjobs were not in the restricted list before.
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["list", "watch"]
   # v2.18.0+ watches EndpointSlice instead of the deprecated v1 Endpoints API by default
   # (kube_endpoint_* metrics never used by any dashboard here, so nothing else to update) -
   # "endpoints" removed above, this replaces it.
@@ -66,7 +72,7 @@ spec:
           # RBAC rules above 1:1) instead of widening RBAC to cluster-wide visibility into
           # CSRs/webhooks/etc. that nothing here needs.
           args:
-            - --resources=pods,nodes,services,persistentvolumeclaims,namespaces,deployments,replicasets,statefulsets,daemonsets,poddisruptionbudgets,endpointslices
+            - --resources=pods,nodes,services,persistentvolumeclaims,namespaces,deployments,replicasets,statefulsets,daemonsets,poddisruptionbudgets,endpointslices,jobs,cronjobs
           ports:
             - containerPort: 8080
             - containerPort: 8081 # telemetry (self-health, serves /readyz)
