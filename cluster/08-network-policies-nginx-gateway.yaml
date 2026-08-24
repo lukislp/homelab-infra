@@ -1,0 +1,60 @@
+# nginx-gateway namespace: default-deny ingress plus exactly the three flows that exist
+# (same strategy as cert-manager/metallb). Egress deliberately stays open.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: nginx-gateway
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+# The data plane is the cluster's front door: every LAN client reaches it through the
+# MetalLB LoadBalancer IP, and those clients are external addresses no pod/namespace
+# selector can ever match - the listener port must accept all sources.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-clients-to-data-plane
+  namespace: nginx-gateway
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: studylife-gateway-nginx } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - ports:
+        - { protocol: TCP, port: 443 }
+---
+# The data plane's agent dials INTO the control plane's gRPC endpoint (8443) to receive
+# its configuration - without this allow, config updates stop flowing the moment
+# default-deny lands.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-data-plane-to-control-plane
+  namespace: nginx-gateway
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: nginx-gateway } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: studylife-gateway-nginx } }
+      ports:
+        - { protocol: TCP, port: 8443 }
+---
+# Prometheus' "nginx-gateway-fabric" job scrapes BOTH pods' :9113 by pod IP (see
+# monitoring/01-prometheus.yaml) - same silent-breakage risk under default-deny as every
+# other scrape target in the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-metrics-scrape
+  namespace: nginx-gateway
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+          podSelector: { matchLabels: { app: prometheus } }
+      ports:
+        - { protocol: TCP, port: 9113 }
