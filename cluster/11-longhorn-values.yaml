@@ -27,6 +27,17 @@ defaultSettings:
   # sizing note below). 2 replicas still survives exactly 1 node loss, which is the only
   # scenario this is being introduced for.
   defaultReplicaCount: 2
+  # Off by chart default - left that way until pinode03 joined (2026-08-25). With only 2
+  # nodes ever holding replicas at a time, auto-balance had nothing to do; once a 3rd node
+  # joined, every volume created before that point stayed pinned to whichever 2 nodes it
+  # originally landed on (Longhorn doesn't rebalance existing replicas on its own) - found
+  # live via a RAM-pressure investigation on pinode01: 23/23 replicas split across
+  # pinode01/02, zero on pinode03, since pinode01/02 predate pinode03 and nothing ever
+  # triggered a move. "best-effort" (not "least-effort"/strict) matches
+  # defaultReplicaCount: 2 on 3 nodes - it fills the least-utilized node without a rigid disk
+  # utilization target, and Longhorn moves replicas gradually (rebuild-then-remove-old, not
+  # all at once), so this is safe to enable on already-attached volumes.
+  replicaAutoBalance: best-effort
   # storageMinimalAvailablePercentage default is high (25%) and assumes real server disks;
   # pinode03 (57GB ephemeral storage) is far smaller than pinode01/02 (229GB) but actual
   # data volume across the whole cluster is currently ~5GB total (verified live: prometheus
