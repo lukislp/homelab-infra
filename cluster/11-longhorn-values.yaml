@@ -1,0 +1,42 @@
+# Longhorn: distributed, cross-node-replicated block storage - installed alongside
+# local-path, NOT replacing it. Installed by hand via helm, like Velero/tailscale - NOT
+# Flux-managed (no helm-controller in this cluster by design):
+#
+#   helm repo add longhorn https://charts.longhorn.io
+#   kubectl create namespace longhorn-system
+#   helm upgrade --install longhorn longhorn/longhorn -n longhorn-system -f cluster/11-longhorn-values.yaml
+#
+# Why alongside, not instead of, local-path: most PVCs in this cluster are fine staying
+# node-pinned (Postgres already has CNPG's own app-level replication + barman offsite
+# backup; Redis/Prometheus/Loki data loss is explicitly accepted, see
+# cluster/00g-velero-backups.md). Longhorn is for workloads where a node dying should mean
+# a SEAMLESS failover, not a restore-from-backup with the associated downtime/manual step -
+# migrated deliberately, one workload at a time, starting with a throwaway test volume to
+# prove replication+failover actually works on this hardware before anything real moves.
+#
+# defaultClass: false - existing/new PVCs keep using local-path unless a workload
+# explicitly opts in via storageClassName: longhorn. Never becomes the cluster default.
+persistence:
+  defaultClass: false
+  defaultClassReplicaCount: 2 # not 3 - see defaultSettings.defaultReplicaCount below
+defaultSettings:
+  # 2-way replication, not the chart's default 3: with exactly 3 nodes, 3 replicas would
+  # put a copy on every single node for every volume (no room to ever rebuild a lost
+  # replica without first losing a node) and triples write amplification/network traffic on
+  # already resource-constrained Pi hardware (see cluster/11-longhorn-values.yaml's own node
+  # sizing note below). 2 replicas still survives exactly 1 node loss, which is the only
+  # scenario this is being introduced for.
+  defaultReplicaCount: 2
+  # storageMinimalAvailablePercentage default is high (25%) and assumes real server disks;
+  # pinode03 (57GB ephemeral storage) is far smaller than pinode01/02 (229GB) but actual
+  # data volume across the whole cluster is currently ~5GB total (verified live: prometheus
+  # 1.3G, loki 308M, postgres ~608M per instance, everything else sub-256M) - default is
+  # fine, left unset deliberately rather than guessing a number without more data.
+  #
+  # guaranteedInstanceManagerCPU left at chart default deliberately - this chart version
+  # (1.7.2) exposes no direct memory/CPU resource-request knobs for longhornManager/
+  # longhornDriver at all (checked via `helm show values`, not assumed), so there's nothing
+  # to conservatively tune down here yet. Revisit if instance-manager gets OOMKilled once
+  # real volumes attach - pinode01/pinode03 are 4GB nodes already running near 50-70% memory
+  # before Longhorn.
+  guaranteedInstanceManagerCPU: ~
