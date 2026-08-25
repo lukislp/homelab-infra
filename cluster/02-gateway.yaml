@@ -309,3 +309,58 @@ spec:
           from: Selector
           selector:
             matchLabels: { kubernetes.io/metadata.name: homelab-autodoc }
+    # claude-queue-platform (separate repo/namespace) - same -heim/-public pair as every
+    # other service on this Gateway. Two hostnames (web + a separate API host) because the
+    # browser and the local agent talk to the API directly (cookies, WebSocket).
+    - name: claudequeue-heim
+      hostname: claudequeue.heim.lan
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: claudequeue-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: claude-queue }
+    - name: claudequeue-public
+      hostname: claudequeue.lukas2311-homelab.com
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: claudequeue-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: claude-queue }
+    - name: claudequeue-api-heim
+      hostname: claudequeue-api.heim.lan
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: claudequeue-api-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: claude-queue }
+    - name: claudequeue-api-public
+      hostname: claudequeue-api.lukas2311-homelab.com
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: claudequeue-api-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: claude-queue }

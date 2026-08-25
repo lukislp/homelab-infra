@@ -110,6 +110,7 @@ schedules:
         # namespace must be added here too.
         - studylife-mcp
         - unifiprotectdashboard
+        - claude-queue
       snapshotVolumes: false
       # Volumes join the backup by OPT-IN pod annotation only
       # (backup.velero.io/backup-volumes: <volume-name>, set in each app's own repo) -
