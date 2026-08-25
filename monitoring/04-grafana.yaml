@@ -67,6 +67,12 @@ metadata:
   namespace: monitoring
 spec:
   accessModes: ["ReadWriteOnce"]
+  # Longhorn (cross-node-replicated, cluster/11-longhorn-values.yaml) instead of local-path -
+  # grafana.db (dashboards/datasources are re-provisioned from git either way, but the manually-
+  # configured Telegram contact point and notification policy aren't) survives a node dying
+  # instead of needing a Velero restore. Recreate strategy below, so no RWX concurrent-mount
+  # trick needed here.
+  storageClassName: longhorn
   resources:
     requests: { storage: 1Gi }
 ---
