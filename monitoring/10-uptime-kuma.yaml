@@ -37,6 +37,10 @@ metadata:
   namespace: monitoring
 spec:
   accessModes: ["ReadWriteOnce"]
+  # Longhorn (cross-node-replicated, cluster/11-longhorn-values.yaml) instead of local-path -
+  # kuma.db (monitors/history/settings) survives a node dying instead of needing a Velero
+  # restore.
+  storageClassName: longhorn
   resources:
     requests: { storage: 512Mi }
 ---
