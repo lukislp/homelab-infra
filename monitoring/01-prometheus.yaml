@@ -394,6 +394,10 @@ metadata:
   namespace: monitoring
 spec:
   accessModes: ["ReadWriteOnce"]
+  # Longhorn (cross-node-replicated, cluster/11-longhorn-values.yaml) instead of local-path -
+  # the TSDB survives a node dying instead of an unrecoverable gap (this volume is deliberately
+  # excluded from the Velero nightly backup, see the accept-no-backup annotation below).
+  storageClassName: longhorn
   resources:
     # 5Gi -> 20Gi 2026-08-13, alongside the retention bump to 30d (~9.4GB estimated) - the
     # local-path StorageClass doesn't support live volume expansion (no
