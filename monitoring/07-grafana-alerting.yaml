@@ -583,6 +583,11 @@ data:
           # backup (03:00, cluster/10-velero-values.yaml). Metric verified live after the
           # first manual backup run; "or vector(0)" again turns a missing metric (Velero
           # down, never succeeded) into infinitely-stale instead of NoData-silence.
+          # max_over_time added after a live false alarm (24->25.08): a fresh Velero pod
+          # exports the gauge only after the schedule's next success, so the helm upgrade
+          # at 23:42 made it vanish and the rule fired until the 05:00 backup resolved it.
+          # The 26h lookback keeps the last success visible across restart gaps, while a
+          # genuinely stale or absent Velero still ages out of the window and fires.
           - uid: alert-velero-backup-stale
             title: "Velero-PVC-Backup ueberfaellig (letzter Erfolg vor mehr als 26h)"
             condition: C
@@ -591,7 +596,7 @@ data:
               - refId: A
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: prometheus
-                model: { refId: A, expr: 'time() - (max(velero_backup_last_successful_timestamp{schedule="velero-nightly-pvc"}) or vector(0))' }
+                model: { refId: A, expr: 'time() - (max(max_over_time(velero_backup_last_successful_timestamp{schedule="velero-nightly-pvc"}[26h])) or vector(0))' }
               - refId: B
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: "__expr__"
