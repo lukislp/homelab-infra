@@ -20,6 +20,34 @@ kubectl apply --server-side -f https://raw.githubusercontent.com/nginx/nginx-gat
 kubectl apply -f https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v2.6.7/deploy/default/deploy.yaml
 ```
 
+## Snippets support (applied live 2026-08-27, required for studylife's asset-cache SnippetsFilter)
+
+The stock `deploy/default/deploy.yaml` ships with SnippetsFilter/SnippetsPolicy support
+DISABLED and without the RBAC for it — a SnippetsFilter applied against that default is
+silently never processed (no status conditions at all), which leaves any HTTPRoute rule
+referencing it via ExtensionRef with `ResolvedRefs=False` and turns that rule's matches into
+500s (learned the hard way: studylife's `/_framework` cache rule briefly 500'd prod assets).
+Both of these were patched live and must be re-applied after any re-bootstrap from the stock
+manifest:
+
+```bash
+# 1. Enable snippets on the control plane (--snippets-filters is the deprecated spelling):
+kubectl -n nginx-gateway patch deployment nginx-gateway --type=json \
+  -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--snippets"}]'
+
+# 2. The stock ClusterRole lacks the snippets resources - without this the controller
+#    crashloops on a forbidden LIST at startup:
+kubectl patch clusterrole nginx-gateway --type=json -p '[
+  {"op":"add","path":"/rules/-","value":{"apiGroups":["gateway.nginx.org"],"resources":["snippetsfilters","snippetspolicies"],"verbs":["list","watch","get"]}},
+  {"op":"add","path":"/rules/-","value":{"apiGroups":["gateway.nginx.org"],"resources":["snippetsfilters/status","snippetspolicies/status"],"verbs":["update"]}}]'
+```
+
+Verified live: SnippetsFilter `studylife-web-asset-cache` reaches `Accepted=True`, the
+studylife `/_framework` route resolves, and the cache answers `MISS` then `HIT` on
+fingerprinted assets (`X-Cache-Status`). Consumers live in the app repos (currently only
+`studylife/k8s/07d-httproutes.yaml`); snippets are route-scoped via ExtensionRef there —
+Gateway-scoped SnippetsPolicies remain unused on purpose (shared gateway, blast radius).
+
 Unlike ingress-nginx, NGF consists of two layers: the control-plane pod (`nginx-gateway`)
 translates Gateway/HTTPRoute objects into NGINX configuration; the actual NGINX data plane
 is only provisioned when a `Gateway` object is created (Deployment + LoadBalancer service
