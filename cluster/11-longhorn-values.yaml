@@ -16,6 +16,15 @@
 #
 # defaultClass: false - existing/new PVCs keep using local-path unless a workload
 # explicitly opts in via storageClassName: longhorn. Never becomes the cluster default.
+#
+# homelab-autodoc findings: Longhorn's ~20 upstream workloads violate the hardening
+# rules (privileged/root containers, no probes/resources/netpols/PDBs, chart-shipped
+# configmaps) for one shared architectural reason - a storage engine needs host and
+# device access, and the chart exposes no fields to change most of it. They are
+# acknowledged NAMESPACE-WIDE via autodoc.homelab/accept-<rule> annotations on the
+# longhorn-system Namespace object (autodoc >= 1.50: namespace-level accepts), applied
+# by hand like the helm install itself - kubectl describe ns longhorn-system shows the
+# nine annotations with their reasons; re-apply them when recreating the namespace.
 persistence:
   defaultClass: false
   defaultClassReplicaCount: 2 # not 3 - see defaultSettings.defaultReplicaCount below
