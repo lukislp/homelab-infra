@@ -441,6 +441,11 @@ spec:
             # ~9.4GB, comfortably affordable. Needed for the studylife-ai per-user cost dashboard
             # to show more than a rolling week.
             - --storage.tsdb.retention.time=30d
+            # Size cap alongside the time cap: the PVC is 20Gi and the 30d estimate (~9.4GB, see
+            # above) has only grown with every scrape target added since - without this, a
+            # cardinality jump fills the volume before the time-based cleanup ever triggers.
+            # 18GB leaves headroom for the WAL and compaction scratch on the same volume.
+            - --storage.tsdb.retention.size=18GB
           ports:
             - containerPort: 9090
           resources:
@@ -448,8 +453,12 @@ spec:
             # limit), OOMKilled observed (2026-07-18, see docs/SCALING.md). Reason: many scrape
             # targets/dashboards (Node Exporter Full, NGF controller metrics, etc.) drive up
             # time-series cardinality.
-            requests: { cpu: 100m, memory: 384Mi }
-            limits: { cpu: 500m, memory: 1Gi }
+            # Same failure mode again 2026-08-27 (OOMKilled x3 at the 1Gi limit, live usage
+            # 883Mi and climbing): the scrape surface grew another notch - redis exporter (added
+            # with Redis AUTH), studylife-mcp /metrics, and more app pods after the August
+            # refactoring rounds. pinode02 sits at ~67% of 8GB, so 1.5Gi fits comfortably.
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: 500m, memory: 1536Mi }
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus
