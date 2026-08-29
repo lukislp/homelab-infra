@@ -364,3 +364,32 @@ spec:
           from: Selector
           selector:
             matchLabels: { kubernetes.io/metadata.name: claude-queue }
+    # studylife-developers (separate repo/namespace) - same -heim/-public pair as every other
+    # service on this Gateway. Backend speaks plain HTTP (ASPNETCORE_HTTP_PORTS=8080, no
+    # BackendTLSPolicy needed), same as studylife-mcp.
+    - name: studylife-developers-heim
+      hostname: studylife-developers.heim.lan
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: studylife-developers-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: studylife-developers }
+    - name: studylife-developers-public
+      hostname: studylife-developers.lukas2311-homelab.com
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: studylife-developers-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: studylife-developers }
