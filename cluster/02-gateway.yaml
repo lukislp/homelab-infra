@@ -28,11 +28,19 @@ spec:
       # itself - no external HPA needed that would compete with the controller over
       # .spec.replicas (the controller continuously keeps this field in sync with the CRD; an
       # additional HPA would create the same field-ownership conflict that originally existed
-      # for studylife-web/-worker before spec.replicas was removed). minReplicas: 2 keeps the
-      # soft anti-affinity below meaningful (1 replica would have nothing to spread).
+      # for studylife-web/-worker before spec.replicas was removed).
+      #
+      # minReplicas: 3, matching the cluster's node count - NOT just "enough to spread", because
+      # the LoadBalancer Service (below) sets externalTrafficPolicy: Local. Under Local, MetalLB
+      # only serves traffic from a node that has its OWN local gateway pod; with fewer replicas
+      # than nodes, whichever node draws the short straw at scale-down has NO local pod at all -
+      # found live (2026-08-30) via a piwatch per-node alert firing for a node that had scaled
+      # down to zero local replicas, well after the node itself had recovered from an unrelated
+      # incident. 3 guarantees every node always has one, regardless which two the old minReplicas
+      # 2 happened to land on.
       autoscaling:
         enable: true
-        minReplicas: 2
+        minReplicas: 3
         maxReplicas: 4
         targetCPUUtilizationPercentage: 70
         behavior:
