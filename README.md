@@ -15,9 +15,10 @@ Prometheus, and Flux's reconciler RBAC.
   (`studylife-gateway`), shared/monitoring-namespace `HTTPRoute`s and `NetworkPolicy`s, Pod
   Disruption Budgets for cluster-wide components (CoreDNS, NGINX Gateway Fabric). **Not**
   Flux-managed — applied once via the provisioning script or by hand.
-- **`monitoring/`** — the whole Prometheus/Grafana/Loki/Promtail/node-exporter/kube-state-metrics
-  stack, shared by every app above. `01-prometheus.yaml` and the 3 grafana files (`05`/`06`/`07`)
-  **are** Flux-managed (see `flux/infra-deploy/`); everything else here is applied once.
+- **`monitoring/`** — the whole Prometheus/Grafana/Loki/Promtail/node-exporter/kube-state-metrics/
+  otel-collector/Tempo stack, shared by every app above. `01-prometheus.yaml`, the 3 grafana
+  files (`05`/`06`/`07`), and `11-otel-collector.yaml`/`12-tempo.yaml` **are** Flux-managed (see
+  `flux/infra-deploy/`); everything else here is applied once.
 - **`flux/`** — Flux's own install manifest and the single shared reconciler RBAC
   (`flux-studylife-reconciler` ClusterRole/Binding) used by every app's Kustomization regardless
   of which repo it's defined in. **Each app's own `GitRepository`/`ImageRepository`/
@@ -40,6 +41,18 @@ its own hostname, and NetworkPolicy scoped to its own namespace.
    MetalLB, ingress controller, Flux install, everything in `cluster/` + `monitoring/`).
 3. `studylife/k8s/bootstrap-cluster.ps1` — studylife's own app manifests.
 4. Each other app's own bootstrap step, documented in its own repo.
+
+## Tracing
+
+Phase 4 of the StudyLife telemetry rollout adds distributed tracing alongside the existing
+Prometheus metrics and Loki logs. The studylife-server (.NET) sends spans via OTLP to
+`otel-collector.monitoring.svc.cluster.local:4317`, sampled at 10% at the source (the collector
+itself does no sampling, just batching/memory-limiting and fan-out - see
+`monitoring/11-otel-collector.yaml`). Traces are stored in Tempo (`monitoring/12-tempo.yaml`),
+local-disk backend, 7 day retention. To look at them: Grafana → Explore → the "Tempo"
+datasource, or jump there directly from a log line in the "Loki" datasource that contains a
+`TraceId`/`trace_id` field (log-to-trace link) - trace view then links back to the matching pod's
+logs the other way (trace-to-log, by `pod`/`namespace`).
 
 ## Why this split, and what didn't move
 

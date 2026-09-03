@@ -1,0 +1,146 @@
+# Trace storage for the StudyLife telemetry rollout, phase 4. Monolithic mode (single binary,
+# "all" target - the default when no -target flag is passed) - no distributed Tempo needed for
+# this cluster size, same reasoning as Loki's single-binary mode (monitoring/08-loki.yaml).
+# Local filesystem backend on a PVC, 7 day retention (analogous to Loki's retention_period and
+# Prometheus' old 7d default). Fed exclusively by monitoring/11-otel-collector.yaml over OTLP
+# gRPC - apps never talk to Tempo directly.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+  namespace: monitoring
+data:
+  tempo.yaml: |
+    server:
+      http_listen_port: 3200
+
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+
+    compactor:
+      compaction:
+        block_retention: 168h # 7 days, limits growth to the Pi's storage budget - same as Loki
+
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /var/tempo/blocks
+        wal:
+          path: /var/tempo/wal
+
+    # metrics_generator (span-metrics/service-graphs derived from traces) is deliberately left
+    # DISABLED: its only output mechanism is remote_write to a Prometheus-compatible ingest
+    # endpoint, and this Prometheus (monitoring/01-prometheus.yaml) does not run with
+    # --web.enable-remote-write-receiver - there is no target it could push to. Enabling it
+    # without a remote_write target just fails to start / silently drops the generated series,
+    # so it's not worth turning on half-configured. Revisit alongside the otel-collector metrics
+    # pipeline TODO once real metrics storage/remote-write is decided on. Left as a reference:
+    # metrics_generator:
+    #   registry:
+    #     external_labels: { source: tempo }
+    #   storage:
+    #     path: /var/tempo/generator-wal
+    #     remote_write:
+    #       - url: http://prometheus.monitoring.svc.cluster.local:9090/api/v1/write
+    # overrides:
+    #   defaults:
+    #     metrics_generator:
+    #       processors: [service-graphs, span-metrics]
+
+    # No phone-home telemetry from a self-hosted homelab component.
+    usage_report:
+      reporting_enabled: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tempo-data
+  namespace: monitoring
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # Longhorn (cross-node-replicated, cluster/11-longhorn-values.yaml) instead of local-path -
+  # same reasoning as loki-data/prometheus-data/grafana-data: survives a node dying instead of
+  # an unrecoverable gap. Deliberately excluded from the Velero nightly backup, see the
+  # accept-no-backup annotation below.
+  storageClassName: longhorn
+  resources:
+    requests: { storage: 5Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: monitoring
+  annotations:
+    # Read by homelab-autodoc's no-backup finding: this volume is deliberately NOT in the
+    # Velero nightly backup - observability data with accepted loss, same policy as
+    # loki-data/prometheus-data (see 00g-velero-backups.md).
+    autodoc.homelab/accept-no-backup: >-
+      trace store is
+      observability data with accepted loss - deliberately excluded from the
+      Velero nightly backup (see 00g-velero-backups.md)
+spec:
+  replicas: 1 # single-binary monolithic mode, no HA need for a learning-project trace volume
+  strategy:
+    type: Recreate # single instance with an RWO volume, same as Loki/Prometheus/Grafana
+  selector:
+    matchLabels: { app: tempo }
+  template:
+    metadata:
+      labels: { app: tempo }
+    spec:
+      # No Kubernetes API access needed.
+      automountServiceAccountToken: false
+      containers:
+        - name: tempo
+          image: grafana/tempo:3.0.3
+          args: ["-config.file=/etc/tempo/tempo.yaml"]
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+            - { name: query, containerPort: 3200 }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 384Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/tempo }
+            - { name: data, mountPath: /var/tempo }
+          # Declares what the image already does (runs as 10001:10001, verified via the
+          # published image config) so the posture is enforced, not incidental - no
+          # data-ownership migration needed, the PVC files are always written by this UID.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /ready, port: 3200 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /ready, port: 3200 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - { name: config, configMap: { name: tempo-config } }
+        - { name: data, persistentVolumeClaim: { claimName: tempo-data } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  selector: { app: tempo }
+  ports:
+    - { name: query, port: 3200, targetPort: 3200 }
+    - { name: otlp-grpc, port: 4317, targetPort: 4317 }
