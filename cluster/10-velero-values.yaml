@@ -92,13 +92,15 @@ metrics:
   enabled: true
 schedules:
   # Nightly at 03:00 - after the 02:00 autodoc collector push, before Postgres' own 03:00
-  # barman run finishes competing for bandwidth is irrelevant at these sizes. 168h TTL
-  # mirrors CNPG's 7-day retention; Velero prunes expired backups itself.
+  # barman run finishes competing for bandwidth is irrelevant at these sizes. 72h TTL
+  # (lowered from 168h 2026-09-03, mirroring CNPG's retention going 7d->3d - a week of
+  # history wasn't needed, and R2 storage/cost scales with it); Velero prunes expired
+  # backups itself.
   nightly-pvc:
     disabled: false
     schedule: "0 3 * * *"
     template:
-      ttl: 168h
+      ttl: 72h
       includedNamespaces:
         - monitoring
         - homelab-autodoc
@@ -129,7 +131,7 @@ schedules:
     disabled: false
     schedule: "30 3 * * *"
     template:
-      ttl: 168h
+      ttl: 72h
       includedNamespaces:
         - kube-system
         - cert-manager
