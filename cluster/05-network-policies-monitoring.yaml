@@ -201,3 +201,49 @@ spec:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: nginx-gateway } }
       ports:
         - { protocol: TCP, port: 8000 }
+---
+# StudyLife telemetry rollout phase 4 (monitoring/11-otel-collector.yaml): every app namespace
+# that will eventually ship OTLP traces gets an ingress rule here, same default-deny-ingress gap
+# as allow-ingress-to-loki above would otherwise silently produce ("connection refused" with no
+# further explanation). studylife-scale/-ai/-mcp already exist as scrape targets in
+# monitoring/01-prometheus.yaml; studylife-alexa/-webhooks are newer namespaces without a
+# scrape job yet but are in scope for tracing regardless. Egress stays open cluster-wide (see
+# the file header), so no matching egress rule is needed on the app-namespace side.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-otel-collector
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: otel-collector } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-ai } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-mcp } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-alexa } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-webhooks } }
+      ports:
+        - { protocol: TCP, port: 4317 } # OTLP gRPC
+        - { protocol: TCP, port: 4318 } # OTLP HTTP
+---
+# Tempo (monitoring/12-tempo.yaml) only ever receives from two places: the collector's OTLP
+# export, and Grafana's query API for the Explore/tracesToLogsV2 UI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-tempo
+  namespace: monitoring
+spec:
+  podSelector: { matchLabels: { app: tempo } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: otel-collector } } # trace export
+      ports:
+        - { protocol: TCP, port: 4317 }
+    - from:
+        - podSelector: { matchLabels: { app: grafana } } # datasource queries (Explore)
+      ports:
+        - { protocol: TCP, port: 3200 }

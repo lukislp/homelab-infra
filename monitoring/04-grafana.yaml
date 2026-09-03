@@ -59,6 +59,49 @@ data:
         type: loki
         access: proxy
         url: http://loki.monitoring.svc.cluster.local:3100
+        jsonData:
+          # Log-to-trace: turns a matched trace ID inside a log line (Explore) into a jump-off
+          # link into the Tempo datasource below. Two entries because the .NET OTel logging
+          # exporter and ad-hoc app log lines don't agree on a single field name - "TraceId"
+          # (Microsoft.Extensions.Logging/W3C convention) and "trace_id" (OTel semantic
+          # conventions) are both matched, whichever appears first in a given line.
+          # $$ instead of $ is deliberate (not a typo): Grafana does env-var expansion on this
+          # provisioning YAML itself, so a literal "$" has to be escaped as "$$" to survive
+          # into the resulting datasource JSON as Grafana's own "${__value.raw}" field syntax.
+          derivedFields:
+            - datasourceUid: tempo
+              matcherRegex: "TraceId[=: ]+([0-9a-f]{32})"
+              name: TraceId
+              url: "$${__value.raw}"
+              urlDisplayLabel: View Trace
+            - datasourceUid: tempo
+              matcherRegex: "trace_id[=: ]+([0-9a-f]{32})"
+              name: trace_id
+              url: "$${__value.raw}"
+              urlDisplayLabel: View Trace
+      # StudyLife telemetry rollout phase 4: trace storage (monitoring/12-tempo.yaml), fed by
+      # the OTLP collector (monitoring/11-otel-collector.yaml). Query API only (port 3200) -
+      # Grafana never talks OTLP to Tempo, only the collector does.
+      - name: Tempo
+        uid: tempo
+        type: tempo
+        access: proxy
+        url: http://tempo.monitoring.svc.cluster.local:3200
+        jsonData:
+          # Trace-to-log: jump from a span in the Tempo trace view back to the matching Loki
+          # log lines, correlated by the "pod"/"namespace" labels promtail already attaches to
+          # every log line (monitoring/09-promtail.yaml) - not by trace ID, since not every log
+          # line carries one. tracesToLogsV2 is the current field; the older "tracesToLogs" key
+          # it replaced is intentionally not also set (Grafana 11 reads v2 exclusively).
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: "-5m"
+            spanEndTimeShift: "5m"
+            tags:
+              - { key: pod, value: pod }
+              - { key: namespace, value: namespace }
+            filterByTraceID: false
+            filterBySpanID: false
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

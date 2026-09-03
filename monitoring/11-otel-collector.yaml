@@ -1,0 +1,136 @@
+# StudyLife telemetry rollout, phase 4 (infrastructure half): a neutral OTLP entry point for
+# distributed traces. Apps (starting with the studylife-server .NET stack) sample at the
+# source (10%, see the app repo's own OTel setup) and ship spans here via OTLP - this collector
+# then fans them out to whichever backend we choose, so that decision stays config-only and
+# never touches the app manifests again. Traces land in Tempo (monitoring/12-tempo.yaml);
+# metrics are only a "debug" placeholder for now (see the metrics pipeline comment below) - logs
+# are deliberately NOT handled here at all, promtail (monitoring/09-promtail.yaml) already ships
+# container logs to Loki and nothing emits OTLP logs yet.
+#
+# NOTE for reviewers: monitoring/01-prometheus.yaml is being edited concurrently on another
+# branch - this file does NOT add a "otel-collector" scrape job there. TODO once that branch
+# merges: add a Prometheus job for the collector's own self-metrics (port 8888, the contrib
+# image's built-in Prometheus exporter for otelcol_* internal telemetry) and one for Tempo's
+# /metrics (port 3200) - neither is scraped yet.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: monitoring
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      # First processor in every pipeline (upstream best practice) - protects the 256Mi
+      # container limit below by proactively dropping/GCing instead of waiting for the kernel
+      # OOM killer. 150MiB soft limit leaves ~100MiB headroom under the hard limit for the
+      # collector's own non-heap overhead (Go runtime, gRPC buffers).
+      memory_limiter:
+        check_interval: 5s
+        limit_mib: 150
+        spike_limit_mib: 30
+      batch:
+        send_batch_size: 1024
+        timeout: 5s
+
+    exporters:
+      # Plaintext gRPC to Tempo - cluster-internal traffic only, same trade-off as Loki's
+      # plaintext push API and Redis without TLS elsewhere in this cluster.
+      otlp/tempo:
+        endpoint: tempo.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+      # Placeholder ONLY: prints received metrics to the collector's own stdout instead of
+      # actually storing them anywhere. Not wired to Prometheus remote-write because this
+      # Prometheus (monitoring/01-prometheus.yaml) doesn't run with
+      # --web.enable-remote-write-receiver - there's no ingest endpoint to point at yet, and
+      # scrape-based collection (Prometheus pulling from the apps directly) already covers
+      # metrics today. Revisit once remote-write (or a second scrape target for the collector's
+      # own OTLP metrics) is actually decided on.
+      debug:
+        verbosity: basic
+
+    extensions:
+      # Backs the Deployment's liveness/readiness probes below.
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp/tempo]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+        # logs pipeline intentionally omitted, see the file header comment.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: monitoring
+spec:
+  replicas: 1 # neutral fan-out point, no HA need for a learning-project-sized trace volume
+  selector:
+    matchLabels: { app: otel-collector }
+  template:
+    metadata:
+      labels: { app: otel-collector }
+    spec:
+      # No Kubernetes API access needed - this collector doesn't run k8sattributes or any
+      # other processor that queries the API server.
+      automountServiceAccountToken: false
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.160.0
+          args: ["--config=/etc/otelcol-contrib/config.yaml"]
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+            - { name: health, containerPort: 13133 }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 200m, memory: 256Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/otelcol-contrib }
+          # Declares what the image already does (runs as 10001:10001, verified via the
+          # published image config) so the posture is enforced, not incidental.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          livenessProbe:
+            httpGet: { path: /, port: 13133 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /, port: 13133 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - { name: config, configMap: { name: otel-collector-config } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: monitoring
+spec:
+  selector: { app: otel-collector }
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: 4317 }
+    - { name: otlp-http, port: 4318, targetPort: 4318 }

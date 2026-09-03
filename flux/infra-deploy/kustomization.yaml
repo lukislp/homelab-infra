@@ -1,11 +1,16 @@
 # Applies EXCLUSIVELY the Flux-managed subset of monitoring/ to the cluster - mirrors
-# studylife/k8s/flux/deploy/kustomization.yaml's own scoping decision. These are the only 4
+# studylife/k8s/flux/deploy/kustomization.yaml's own scoping decision. These are the only 6
 # files out of this whole repo that get continuously reconciled from Git; everything else here
 # (cluster/, the rest of monitoring/, provisioning/) is applied once via
 # provisioning/bootstrap-cluster.ps1, same as studylife's own k8s/ folder.
 #
+# 11-otel-collector.yaml/12-tempo.yaml joined this list (StudyLife telemetry rollout phase 4):
+# their ConfigMaps are the kind of thing that gets iterated on over time (sampling/exporters,
+# retention) the same way prometheus-config does below, so they get the same continuous
+# reconciliation instead of requiring a manual bootstrap-cluster.ps1 rerun for every tweak.
+#
 # No patches needed here (unlike studylife's own deploy/kustomization.yaml, which forces
-# imagePullPolicy: Always on the app Deployments) - none of these 4 objects have a
+# imagePullPolicy: Always on the app Deployments) - none of these 6 objects have a
 # git-committed placeholder that needs overriding at apply time.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -25,3 +30,10 @@ resources:
   # Alert rules + notification policy (no placeholders) - the Telegram contact point itself is
   # deliberately NOT managed here (manual UI setup, see file header).
   - ../../monitoring/07-grafana-alerting.yaml
+  # OpenTelemetry collector config (OTLP traces fan-out to Tempo) - same "config-file-only,
+  # read at startup" caveat as Prometheus above: a plain ConfigMap apply is not enough, also run
+  # "kubectl -n monitoring rollout restart deployment/otel-collector" after a config change.
+  - ../../monitoring/11-otel-collector.yaml
+  # Tempo (trace storage) - same startup-only config caveat: also run
+  # "kubectl -n monitoring rollout restart deployment/tempo" after a config change.
+  - ../../monitoring/12-tempo.yaml
