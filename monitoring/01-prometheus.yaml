@@ -134,6 +134,27 @@ data:
             replacement: "${1}:8000"
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
+      # studylife-server (main repo, namespace studylife-scale) - .NET/OpenTelemetry metrics
+      # (HTTP request duration/status, rate-limiter, cache, SSE, TTS, webhooks, worker tick,
+      # Kestrel/.NET runtime) exported on a dedicated metrics-only listener, port 9464, path
+      # /metrics - separate from the app's normal HTTP port. Reached pod-to-pod like every job
+      # on this page; a NetworkPolicy in studylife-scale only allows app=prometheus pods from
+      # this namespace onto 9464. Dashboard: 05-grafana-dashboards.yaml "StudyLife" folder.
+      - job_name: studylife-server
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [studylife-scale] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: studylife-web|studylife-worker
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9464"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
       # NGINX Gateway Fabric (see k8s/06c-nginx-gateway-fabric.md, now completely replaces the
       # decommissioned ingress-nginx): the control-plane pod (nginx-gateway:
       # nginx_gateway_fabric_*/controller_runtime_*) and the NGINX data plane provisioned per

@@ -247,6 +247,105 @@ data:
           "targets": [{ "expr": "count(count by (key) (redis_key_size{key=~\"worker:shard:.*\"}))", "refId": "A" }] }
       ]
     }
+  # New: dashboard for the studylife-server OpenTelemetry metrics (job "studylife-server" in
+  # 01-prometheus.yaml, port 9464/metrics on studylife-web + studylife-worker). All metric/tag
+  # names below were checked directly against studylife PR #139 ("expose OpenTelemetry server
+  # metrics on a dedicated listener", Services/StudyLifeMetrics.cs + Program.cs), not just
+  # guessed from its description: studylife.cache.requests, studylife.sse.streams.started/open,
+  # studylife.tts.requests/synthesis.duration, studylife.webhooks.publishes/publish.duration
+  # (tag "outcome": ok/http_error/failed/dropped) and studylife.auth.session_cache.lookups (tag
+  # "result": hit/miss) all exist exactly as named, becoming studylife_..._total/_seconds_bucket
+  # etc. once Prometheus-exported. The standard ASP.NET Core/Kestrel/rate-limiter names
+  # (http.server.request.duration, aspnetcore.rate_limiting.*, kestrel.active_connections) match
+  # both PR #139's Program.cs (AddAspNetCoreInstrumentation + AddMeter("Microsoft.AspNetCore.
+  # RateLimiting", "Microsoft.AspNetCore.Server.Kestrel")) and the OpenTelemetry/ASP.NET Core
+  # source. The runtime panels use the names a live scrape of the server actually exports:
+  # OpenTelemetry.Instrumentation.Runtime 1.18 re-exports the .NET System.Runtime meter, so
+  # the family is dotnet_* (dotnet_gc_last_collection_heap_size_bytes by gc_heap_generation,
+  # dotnet_process_memory_working_set_bytes, dotnet_gc_pause_time_seconds_total, ...), NOT the
+  # older process_runtime_dotnet_* names from the contrib README.
+  studylife-server.json: |
+    {
+      "title": "StudyLife Server",
+      "uid": "studylife-server",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "30s",
+      "description": "HTTP requests, rate limiting, cache, SSE, TTS, webhooks, worker ticks and .NET runtime for the studylife-web/-worker pods - OpenTelemetry metrics on the dedicated metrics listener (port 9464, see the \"studylife-server\" job in 01-prometheus.yaml).",
+      "panels": [
+        { "id": 1, "title": "Requests", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] },
+        { "id": 2, "title": "Request rate by route", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+          "description": "Requests/second per http_route, derived from ASP.NET Core's own request-duration histogram.",
+          "targets": [{ "expr": "sum by (http_route) (rate(http_server_request_duration_seconds_count[5m]))", "legendFormat": "{{http_route}}", "refId": "A" }] },
+        { "id": 3, "title": "p95 latency by route", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+          "description": "95th percentile request duration per http_route.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_duration_seconds_bucket[5m])))", "legendFormat": "{{http_route}}", "refId": "A" }] },
+        { "id": 4, "title": "5xx ratio (overall)", "type": "stat", "gridPos": { "h": 6, "w": 12, "x": 0, "y": 9 },
+          "description": "Share of all requests answered with a 5xx status code.",
+          "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.05 } ] } } },
+          "targets": [{ "expr": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count[5m])) or vector(0)", "refId": "A" }] },
+        { "id": 5, "title": "Rate-limiter rejections", "type": "timeseries", "gridPos": { "h": 6, "w": 12, "x": 12, "y": 9 },
+          "description": "Requests per rate-limiting policy and result (aspnetcore.rate_limiting.* - ASP.NET Core's built-in rate-limiting middleware meter).",
+          "targets": [{ "expr": "sum by (aspnetcore_rate_limiting_policy, aspnetcore_rate_limiting_result) (rate(aspnetcore_rate_limiting_requests_total[5m]))", "legendFormat": "{{aspnetcore_rate_limiting_policy}} / {{aspnetcore_rate_limiting_result}}", "refId": "A" }] },
+        { "id": 6, "title": "Cache & Realtime", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }, "panels": [] },
+        { "id": 7, "title": "Cache results by outcome", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "description": "not_modified/hit/miss breakdown of the application cache (CacheHelper), stacked.",
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" } } } },
+          "targets": [{ "expr": "sum by (result) (rate(studylife_cache_requests_total[5m]))", "legendFormat": "{{result}}", "refId": "A" }] },
+        { "id": 8, "title": "SSE streams open", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+          "description": "Currently open Server-Sent-Events connections (/api/events), a gauge.",
+          "targets": [{ "expr": "sum(studylife_sse_streams_open)", "refId": "A" }] },
+        { "id": 9, "title": "SSE streams started/second", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+          "description": "Rate of newly opened SSE streams.",
+          "targets": [{ "expr": "sum(rate(studylife_sse_streams_started_total[5m]))", "refId": "A" }] },
+        { "id": 10, "title": "Auth session cache hit ratio", "type": "stat", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+          "description": "Share of per-pod auth-session cache lookups that were a hit.",
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "green", "value": 0.9 } ] } } },
+          "targets": [{ "expr": "sum(rate(studylife_auth_session_cache_lookups_total{result=\"hit\"}[5m])) / sum(rate(studylife_auth_session_cache_lookups_total[5m])) or vector(0)", "refId": "A" }] },
+        { "id": 11, "title": "Speech & Webhooks", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 }, "panels": [] },
+        { "id": 12, "title": "TTS requests by result", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+          "description": "Text-to-speech requests by result (cache_hit/synthesized/rejected/unavailable).",
+          "targets": [{ "expr": "sum by (result) (rate(studylife_tts_requests_total[5m]))", "legendFormat": "{{result}}", "refId": "A" }] },
+        { "id": 13, "title": "TTS synthesis p95", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+          "description": "95th percentile wall time of one ONNX speech-synthesis run (cache misses only).",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_tts_synthesis_duration_seconds_bucket[5m])))", "refId": "A" }] },
+        { "id": 14, "title": "Webhook publishes by outcome", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
+          "description": "Event publishes to studylife-webhooks by outcome (ok/http_error/failed/dropped).",
+          "targets": [{ "expr": "sum by (outcome) (rate(studylife_webhooks_publishes_total[5m]))", "legendFormat": "{{outcome}}", "refId": "A" }] },
+        { "id": 15, "title": "Webhook publish p95", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 41 },
+          "description": "95th percentile round-trip time of one publish to studylife-webhooks.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_webhooks_publish_duration_seconds_bucket[5m])))", "refId": "A" }] },
+        { "id": 16, "title": "Worker & Runtime", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 49 }, "panels": [] },
+        { "id": 17, "title": "Worker tick duration p95/max", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 50 },
+          "description": "Wall time of one BackgroundTaskService tick (all users, all due jobs), studylife-worker pods only. \"max\" is a histogram_quantile(1, ...) approximation - the true maximum cannot be reconstructed exactly from histogram buckets.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_worker_tick_duration_seconds_bucket{app=\"studylife-worker\"}[5m])))", "legendFormat": "p95", "refId": "A" },
+            { "expr": "histogram_quantile(1.0, sum by (le) (rate(studylife_worker_tick_duration_seconds_bucket{app=\"studylife-worker\"}[5m])))", "legendFormat": "max (approx.)", "refId": "B" }
+          ] },
+        { "id": 18, "title": "Scrape health per pod", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 12, "y": 50 },
+          "description": "1 = Prometheus last scraped this pod's /metrics successfully.",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "up{job=\"studylife-server\"}", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 19, "title": "Kestrel active connections", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 18, "y": 50 },
+          "description": "kestrel.active_connections (ASP.NET Core's built-in Kestrel meter) per pod.",
+          "targets": [{ "expr": "sum by (pod) (kestrel_active_connections{job=\"studylife-server\"})", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 20, "title": ".NET GC heap size by generation", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 58 },
+          "description": "dotnet.gc.last_collection.heap.size (OpenTelemetry.Instrumentation.Runtime 1.18 re-exports the .NET 9+ System.Runtime meter, names verified against a live scrape) by generation (gen0/gen1/gen2/loh/poh), summed across all pods.",
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [{ "expr": "sum by (gc_heap_generation) (dotnet_gc_last_collection_heap_size_bytes{job=\"studylife-server\"})", "legendFormat": "{{gc_heap_generation}}", "refId": "A" }] },
+        { "id": 21, "title": "Process working set", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 58 },
+          "description": "dotnet.process.memory.working_set per pod (verified live) - compare against the container memory limit (web 1200Mi, worker 256Mi) to spot pods drifting towards an OOM kill.",
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [{ "expr": "dotnet_process_memory_working_set_bytes{job=\"studylife-server\"}", "legendFormat": "{{pod}}", "refId": "A" }] }
+      ]
+    }
   npm.json: |
     {
       "title": "Nginx Proxy Manager (extern)",
