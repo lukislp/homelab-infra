@@ -126,6 +126,69 @@ data:
           "targets": [{ "expr": "max(cnpg_pg_stat_replication_replay_lag_seconds)", "refId": "A" }] }
       ]
     }
+  # New: a single-screen landing page across ALL StudyLife app layers (server, client, add-ons,
+  # AI, MCP), complementing the existing overview.json above (which is cluster-infrastructure
+  # focused - CNPG/Redis/gateway/node health). uid deliberately NOT "studylife-overview": that
+  # uid is already taken by overview.json right above, in the same folder/provider - reusing it
+  # here would make Grafana's file-based dashboard provisioner nondeterministically keep only one
+  # of the two JSON files (whichever it processes last), silently dropping the other. Picked
+  # "studylife-app-overview" instead so both dashboards coexist. Panel count kept to ~12 by
+  # design; memory-vs-limit uses the standard cAdvisor container_memory_working_set_bytes metric
+  # (same "well-known cluster metric, not in the studylife-job inventory dump" exception already
+  # used above for kube_deployment_status_replicas_available/node_memory_MemTotal_bytes) rather
+  # than the OpenTelemetry dotnet.process.memory.working_set, since only the latter's job-scoped
+  # name was checked against tonight's live inventory. studylife_client_errors_total/boots_total
+  # are the same "no live data yet for errors, boots confirmed live" client-side metrics already
+  # used (and flagged) in studylife-client.json.
+  studylife-overview.json: |
+    {
+      "title": "StudyLife Overview",
+      "uid": "studylife-app-overview",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "1m",
+      "description": "One screen with the key numbers across every StudyLife app layer (server, client, add-ons) - for deeper digging use the linked detail dashboards.",
+      "panels": [
+        { "id": 1, "title": "Server request rate", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 0, "y": 0 },
+          "targets": [{ "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"studylife-server\"}[5m]))", "refId": "A" }] },
+        { "id": 2, "title": "Server p95 latency", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 4, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{job=\"studylife-server\"}[5m])))", "refId": "A" }] },
+        { "id": 3, "title": "Server 5xx share", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 8, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.05 } ] } } },
+          "targets": [{ "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"studylife-server\",http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count{job=\"studylife-server\"}[5m])) or vector(0)", "refId": "A" }] },
+        { "id": 4, "title": "Pods up by job", "type": "bargauge", "gridPos": { "h": 6, "w": 4, "x": 12, "y": 0 },
+          "description": "All StudyLife scrape jobs (server, webhooks, alexa, AI, MCP) - 0 means Prometheus can't reach that service's /metrics at all.",
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "sum by (job) (up{job=~\"studylife.*\"})", "legendFormat": "{{job}}", "refId": "A" }] },
+        { "id": 5, "title": "DB operation p95", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 16, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket[5m])))", "refId": "A" }] },
+        { "id": 6, "title": "Worker tick p95", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 20, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_worker_tick_duration_seconds_bucket[5m])))", "refId": "A" }] },
+        { "id": 7, "title": "Client boots/hour", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 0, "y": 6 },
+          "targets": [{ "expr": "sum(increase(studylife_client_boots_total[1h]))", "refId": "A" }] },
+        { "id": 8, "title": "Client cold-start p50 (dashboard ready)", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 6, "y": 6 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_dashboard_ready_duration_seconds_bucket{cold=\"true\"}[5m])))", "refId": "A" }] },
+        { "id": 9, "title": "Client errors/hour", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 12, "y": 6 },
+          "description": "studylife_client_errors_total - no live data yet (unconfirmed metric name, same caveat as in studylife-client.json).",
+          "targets": [{ "expr": "sum(increase(studylife_client_errors_total[1h])) or vector(0)", "refId": "A" }] },
+        { "id": 10, "title": "Web memory vs 1200Mi limit", "type": "gauge", "gridPos": { "h": 6, "w": 6, "x": 18, "y": 6 },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "max": 1258291200, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 943718400 }, { "color": "red", "value": 1132462080 } ] } } },
+          "targets": [{ "expr": "max(sum by (pod) (container_memory_working_set_bytes{namespace=\"studylife-scale\",pod=~\"studylife-web-.*\",container!=\"\"}))", "refId": "A" }] },
+        { "id": 11, "title": "Worker memory vs 256Mi limit", "type": "gauge", "gridPos": { "h": 6, "w": 12, "x": 0, "y": 12 },
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "max": 268435456, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 201326592 }, { "color": "red", "value": 241591910 } ] } } },
+          "targets": [{ "expr": "max(sum by (pod) (container_memory_working_set_bytes{namespace=\"studylife-scale\",pod=~\"studylife-worker-.*\",container!=\"\"}))", "refId": "A" }] },
+        { "id": 12, "title": "Detail dashboards", "type": "text", "gridPos": { "h": 6, "w": 12, "x": 12, "y": 12 },
+          "options": { "mode": "markdown", "content": "**StudyLife app**\n- [Server](/d/studylife-server) · [Client](/d/studylife-client) · [Add-ons](/d/studylife-addons)\n- [AI](/d/studylife-ai-overview) · [MCP](/d/studylife-mcp-overview)\n\n**Infrastructure**\n- [Cluster overview](/d/studylife-overview) · [Cluster](/d/studylife-cluster) · [CloudNativePG](/d/studylife-cnpg) · [Redis](/d/studylife-redis)\n- [Ingress](/d/studylife-ingress) · [Worker shards](/d/studylife-worker-shards) · [NPM](/d/studylife-npm) · [Logs](/d/studylife-logs)" } }
+      ]
+    }
   cnpg.json: |
     {
       "title": "CloudNativePG",
@@ -272,6 +335,11 @@ data:
       "time": { "from": "now-6h", "to": "now" },
       "refresh": "30s",
       "description": "HTTP requests, rate limiting, cache, SSE, TTS, webhooks, worker ticks and .NET runtime for the studylife-web/-worker pods - OpenTelemetry metrics on the dedicated metrics listener (port 9464, see the \"studylife-server\" job in 01-prometheus.yaml).",
+      "templating": {
+        "list": [
+          { "name": "pod", "type": "query", "label": "Pod", "query": "label_values(up{job=\"studylife-server\"}, pod)", "definition": "label_values(up{job=\"studylife-server\"}, pod)", "multi": true, "includeAll": true, "allValue": ".+", "refresh": 1, "sort": 1, "current": {} }
+        ]
+      },
       "panels": [
         { "id": 1, "title": "Requests", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] },
         { "id": 2, "title": "Request rate by route", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
@@ -343,7 +411,128 @@ data:
         { "id": 21, "title": "Process working set", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 58 },
           "description": "dotnet.process.memory.working_set per pod (verified live) - compare against the container memory limit (web 1200Mi, worker 256Mi) to spot pods drifting towards an OOM kill.",
           "fieldConfig": { "defaults": { "unit": "bytes" } },
-          "targets": [{ "expr": "dotnet_process_memory_working_set_bytes{job=\"studylife-server\"}", "legendFormat": "{{pod}}", "refId": "A" }] }
+          "targets": [{ "expr": "dotnet_process_memory_working_set_bytes{job=\"studylife-server\"}", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 22, "title": "Rate limiting", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 66 }, "panels": [] },
+        { "id": 23, "title": "Rate-limiting requests by policy and result", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 67 },
+          "description": "aspnetcore.rate_limiting.requests by policy and outcome (acquired/endpoint_limiter/global_limiter/request_canceled/request_rejected) - a deep-dive companion to the rejection view already on the \"Requests\" row above.",
+          "targets": [{ "expr": "sum by (aspnetcore_rate_limiting_policy, aspnetcore_rate_limiting_result) (rate(aspnetcore_rate_limiting_requests_total[5m]))", "legendFormat": "{{aspnetcore_rate_limiting_policy}} / {{aspnetcore_rate_limiting_result}}", "refId": "A" }] },
+        { "id": 24, "title": "Rate-limit lease wait p95 by policy", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 67 },
+          "description": "95th percentile time a request waited to acquire a rate-limiting lease, per policy.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, aspnetcore_rate_limiting_policy) (rate(aspnetcore_rate_limiting_request_lease_duration_seconds_bucket[5m])))", "legendFormat": "{{aspnetcore_rate_limiting_policy}}", "refId": "A" }] },
+        { "id": 25, "title": "Active rate-limit leases by policy", "type": "timeseries", "gridPos": { "h": 6, "w": 24, "x": 0, "y": 75 },
+          "description": "Currently held leases per policy, a gauge. No separate \"queued requests\" gauge is exported by the rate-limiting meter (checked against the live inventory).",
+          "targets": [{ "expr": "sum by (aspnetcore_rate_limiting_policy) (aspnetcore_rate_limiting_active_request_leases)", "legendFormat": "{{aspnetcore_rate_limiting_policy}}", "refId": "A" }] },
+        { "id": 26, "title": "Database (Npgsql / EF Core)", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 81 }, "panels": [],
+          "description": "No Microsoft.EntityFrameworkCore.* meter names appear in tonight's live inventory (EF Core metrics instrumentation isn't enabled/exported yet) - this row only covers the Npgsql-level db.client.* series that are actually live." },
+        { "id": 27, "title": "DB operation duration p95 by pool", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 82 },
+          "description": "db.client.operation.duration (Npgsql's own OpenTelemetry instrumentation) by connection pool.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, db_client_connection_pool_name) (rate(db_client_operation_duration_seconds_bucket[5m])))", "legendFormat": "{{db_client_connection_pool_name}}", "refId": "A" }] },
+        { "id": 28, "title": "DB operation rate by pool", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 82 },
+          "targets": [{ "expr": "sum by (db_client_connection_pool_name) (rate(db_client_operation_duration_seconds_count[5m]))", "legendFormat": "{{db_client_connection_pool_name}}", "refId": "A" }] },
+        { "id": 29, "title": "Connection count by state vs pool max", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 90 },
+          "description": "db.client.connection.count by pool/state against db.client.connection.max, restricted to the selected pod(s).",
+          "targets": [
+            { "expr": "sum by (db_client_connection_pool_name, db_client_connection_state) (db_client_connection_count{pod=~\"$pod\"})", "legendFormat": "{{db_client_connection_pool_name}} / {{db_client_connection_state}}", "refId": "A" },
+            { "expr": "max by (db_client_connection_pool_name) (db_client_connection_max{pod=~\"$pod\"})", "legendFormat": "{{db_client_connection_pool_name}} max", "refId": "B" }
+          ] },
+        { "id": 30, "title": "Npgsql connection create time p95 by pool", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 90 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, db_client_connection_pool_name) (rate(db_client_connection_npgsql_create_time_seconds_bucket[5m])))", "legendFormat": "{{db_client_connection_pool_name}}", "refId": "A" }] },
+        { "id": 31, "title": "Npgsql bytes read/written rate by pool", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 98 },
+          "fieldConfig": { "defaults": { "unit": "Bps" } },
+          "targets": [
+            { "expr": "sum by (db_client_connection_pool_name) (rate(db_client_operation_npgsql_bytes_read_bytes_total[5m]))", "legendFormat": "read {{db_client_connection_pool_name}}", "refId": "A" },
+            { "expr": "sum by (db_client_connection_pool_name) (rate(db_client_operation_npgsql_bytes_written_bytes_total[5m]))", "legendFormat": "written {{db_client_connection_pool_name}}", "refId": "B" }
+          ] },
+        { "id": 32, "title": "Npgsql in-flight operations", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 12, "y": 98 },
+          "description": "db.client.operation.npgsql.executing - operations currently in flight per pool.",
+          "targets": [{ "expr": "sum by (db_client_connection_pool_name) (db_client_operation_npgsql_executing)", "legendFormat": "{{db_client_connection_pool_name}}", "refId": "A" }] },
+        { "id": 33, "title": "Npgsql prepared-statement ratio", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 18, "y": 98 },
+          "description": "Share of statements served from Npgsql's automatic prepared-statement cache, per pool.",
+          "fieldConfig": { "defaults": { "unit": "percentunit" } },
+          "targets": [{ "expr": "avg by (db_client_connection_pool_name) (db_client_operation_npgsql_prepared_ratio)", "legendFormat": "{{db_client_connection_pool_name}}", "refId": "A" }] },
+        { "id": 34, "title": "Kestrel & HTTP client", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 106 }, "panels": [] },
+        { "id": 35, "title": "Kestrel active & queued connections", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 107 },
+          "targets": [
+            { "expr": "sum by (server_address) (kestrel_active_connections{job=\"studylife-server\"})", "legendFormat": "active {{server_address}}", "refId": "A" },
+            { "expr": "sum by (server_address) (kestrel_queued_connections{job=\"studylife-server\"})", "legendFormat": "queued {{server_address}}", "refId": "B" }
+          ] },
+        { "id": 36, "title": "HTTP server active requests by method", "type": "stat", "gridPos": { "h": 8, "w": 4, "x": 8, "y": 107 },
+          "targets": [{ "expr": "sum by (http_request_method) (http_server_active_requests{job=\"studylife-server\"})", "legendFormat": "{{http_request_method}}", "refId": "A" }] },
+        { "id": 37, "title": "Kestrel connection duration p95", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 107 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(kestrel_connection_duration_seconds_bucket{job=\"studylife-server\"}[5m])))", "refId": "A" }] },
+        { "id": 38, "title": "Kestrel active TLS handshakes", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 0, "y": 115 },
+          "targets": [{ "expr": "sum(kestrel_active_tls_handshakes{job=\"studylife-server\"})", "refId": "A" }] },
+        { "id": 39, "title": "Kestrel TLS handshake duration p95", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 6, "y": 115 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, tls_protocol_version) (rate(kestrel_tls_handshake_duration_seconds_bucket{job=\"studylife-server\"}[5m])))", "legendFormat": "{{tls_protocol_version}}", "refId": "A" }] },
+        { "id": 40, "title": "Outbound HTTP client request duration p95 by target", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 115 },
+          "description": "http.client.request.duration by server_address (outbound HttpClient calls, e.g. to studylife-webhooks/-alexa or external services).",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_seconds_bucket[5m])))", "legendFormat": "{{server_address}}", "refId": "A" }] },
+        { "id": 41, "title": "Outbound HTTP client request rate by target", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 123 },
+          "targets": [{ "expr": "sum by (server_address) (rate(http_client_request_duration_seconds_count[5m]))", "legendFormat": "{{server_address}}", "refId": "A" }] },
+        { "id": 42, "title": "Outbound HTTP client connection duration p95", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 12, "y": 123 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_connection_duration_seconds_bucket[5m])))", "legendFormat": "{{server_address}}", "refId": "A" }] },
+        { "id": 43, "title": "Outbound HTTP client open connections", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 18, "y": 123 },
+          "targets": [{ "expr": "sum by (server_address, http_connection_state) (http_client_open_connections)", "legendFormat": "{{server_address}} / {{http_connection_state}}", "refId": "A" }] },
+        { "id": 44, "title": "Outbound HTTP client time-in-queue p95", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 131 },
+          "description": "Time an outbound request spent queued waiting for a free HttpClient connection - rising values are an early symptom of connection-pool exhaustion.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_time_in_queue_seconds_bucket[5m])))", "legendFormat": "{{server_address}}", "refId": "A" }] },
+        { "id": 45, "title": "Outbound HTTP client active requests", "type": "stat", "gridPos": { "h": 8, "w": 8, "x": 8, "y": 131 },
+          "targets": [{ "expr": "sum by (server_address) (http_client_active_requests)", "legendFormat": "{{server_address}}", "refId": "A" }] },
+        { "id": 46, "title": "DNS lookup duration p95", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 16, "y": 131 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, dns_question_name) (rate(dns_lookup_duration_seconds_bucket[5m])))", "legendFormat": "{{dns_question_name}}", "refId": "A" }] },
+        { "id": 47, "title": "ASP.NET Core memory pool bytes pooled (current)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 139 },
+          "description": "aspnetcore.memory_pool.pooled_bytes - buffer bytes currently held by Kestrel's pinned memory pool, per owner.",
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [{ "expr": "sum by (aspnetcore_memory_pool_owner) (aspnetcore_memory_pool_pooled_bytes)", "legendFormat": "{{aspnetcore_memory_pool_owner}}", "refId": "A" }] },
+        { "id": 48, "title": "ASP.NET Core memory pool byte churn rate", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 139 },
+          "fieldConfig": { "defaults": { "unit": "Bps" } },
+          "targets": [
+            { "expr": "sum(rate(aspnetcore_memory_pool_allocated_bytes_total[5m]))", "legendFormat": "allocated", "refId": "A" },
+            { "expr": "sum(rate(aspnetcore_memory_pool_evicted_bytes_total[5m]))", "legendFormat": "evicted", "refId": "B" },
+            { "expr": "sum(rate(aspnetcore_memory_pool_rented_bytes_total[5m]))", "legendFormat": "rented", "refId": "C" }
+          ] },
+        { "id": 49, "title": "Runtime", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 147 }, "panels": [],
+          "description": "Only the dotnet.* series actually confirmed in tonight's live inventory: GC collections/heap fragmentation by generation, exceptions, process CPU time. Thread pool, lock contention, JIT, timer/assembly counts and dotnet.process.cpu.count are NOT exported by this build (checked against the live inventory); dotnet.gc.last_collection.heap.size and dotnet.process.memory.working_set are already covered above." },
+        { "id": 50, "title": "GC collections rate by generation", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 0, "y": 148 },
+          "targets": [{ "expr": "sum by (gc_heap_generation) (rate(dotnet_gc_collections_total{job=\"studylife-server\"}[5m]))", "legendFormat": "{{gc_heap_generation}}", "refId": "A" }] },
+        { "id": 51, "title": "GC heap fragmentation by generation", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 6, "y": 148 },
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [{ "expr": "sum by (gc_heap_generation) (dotnet_gc_last_collection_heap_fragmentation_size_bytes{job=\"studylife-server\"})", "legendFormat": "{{gc_heap_generation}}", "refId": "A" }] },
+        { "id": 52, "title": ".NET exceptions rate by error type", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 12, "y": 148 },
+          "targets": [{ "expr": "sum by (error_type) (rate(dotnet_exceptions_total{job=\"studylife-server\"}[5m]))", "legendFormat": "{{error_type}}", "refId": "A" }] },
+        { "id": 53, "title": "Process CPU time rate by pod and mode", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 18, "y": 148 },
+          "description": "Rate of dotnet.process.cpu.time - approximates CPU cores consumed per pod, split by user/system mode.",
+          "targets": [{ "expr": "sum by (pod, cpu_mode) (rate(dotnet_process_cpu_time_seconds_total{job=\"studylife-server\",pod=~\"$pod\"}[5m]))", "legendFormat": "{{pod}} / {{cpu_mode}}", "refId": "A" }] },
+        { "id": 54, "title": "Build info per pod", "type": "table", "gridPos": { "h": 6, "w": 24, "x": 0, "y": 156 },
+          "description": "target_info - one row per pod with service_version/telemetry_sdk_* labels, useful to confirm a rollout reached every pod.",
+          "targets": [{ "expr": "target_info{job=\"studylife-server\"}", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 55, "title": "Auth, cache & realtime (details)", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 162 }, "panels": [],
+          "description": "SSE stream gauges, TTS and studylife-webhooks publish metrics referenced elsewhere in this dashboard's own header comment are NOT present in tonight's live inventory dump for the studylife-server job - only the auth/authn/authz/routing/cache series below are confirmed live." },
+        { "id": 56, "title": "Auth session cache lookups by result (rate)", "type": "timeseries", "gridPos": { "h": 8, "w": 6, "x": 0, "y": 163 },
+          "targets": [{ "expr": "sum by (result) (rate(studylife_auth_session_cache_lookups_total[5m]))", "legendFormat": "{{result}}", "refId": "A" }] },
+        { "id": 57, "title": "Authenticate duration p95 by scheme & result", "type": "timeseries", "gridPos": { "h": 8, "w": 9, "x": 6, "y": 163 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, aspnetcore_authentication_scheme, aspnetcore_authentication_result) (rate(aspnetcore_authentication_authenticate_duration_seconds_bucket[5m])))", "legendFormat": "{{aspnetcore_authentication_scheme}} / {{aspnetcore_authentication_result}}", "refId": "A" }] },
+        { "id": 58, "title": "Authorization attempts by result", "type": "timeseries", "gridPos": { "h": 8, "w": 9, "x": 15, "y": 163 },
+          "targets": [{ "expr": "sum by (aspnetcore_authorization_result, aspnetcore_user_is_authenticated) (rate(aspnetcore_authorization_attempts_total[5m]))", "legendFormat": "{{aspnetcore_authorization_result}} / authenticated={{aspnetcore_user_is_authenticated}}", "refId": "A" }] },
+        { "id": 59, "title": "Routing match attempts by status", "type": "timeseries", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 171 },
+          "targets": [{ "expr": "sum by (aspnetcore_routing_match_status) (rate(aspnetcore_routing_match_attempts_total[5m]))", "legendFormat": "{{aspnetcore_routing_match_status}}", "refId": "A" }] },
+        { "id": 60, "title": "Client telemetry ingestion", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 179 }, "panels": [],
+          "description": "Health of the POST /api/telemetry beacon endpoint itself, measured via the server's own http.server.request.duration for that route. The client-reported payloads it ingests are visualised in studylife-client.json." },
+        { "id": 61, "title": "api/telemetry request rate by pod and status", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 180 },
+          "targets": [{ "expr": "sum by (pod, http_response_status_code) (rate(http_server_request_duration_seconds_count{http_route=\"api/telemetry\",pod=~\"$pod\"}[5m]))", "legendFormat": "{{pod}} / {{http_response_status_code}}", "refId": "A" }] },
+        { "id": 62, "title": "api/telemetry p95 latency", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 180 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{http_route=\"api/telemetry\"}[5m])))", "refId": "A" }] }
       ]
     }
   # New: dashboard for the CLIENT side of StudyLife's telemetry (phase 2/3 of the plan, see
@@ -516,6 +705,68 @@ data:
             { "expr": "sum(increase(studylife_client_app_resource_cellular_bytes_sum{platform=~\"$platform\"}[1d])) / sum(increase(studylife_client_app_resource_cellular_bytes_count{platform=~\"$platform\"}[1d])) or vector(0)", "legendFormat": "cellular", "refId": "A" },
             { "expr": "sum(increase(studylife_client_app_resource_wifi_bytes_sum{platform=~\"$platform\"}[1d])) / sum(increase(studylife_client_app_resource_wifi_bytes_count{platform=~\"$platform\"}[1d])) or vector(0)", "legendFormat": "wifi", "refId": "B" }
           ] }
+      ]
+    }
+  # New: dashboard for the two small companion services, studylife-webhooks and studylife-alexa
+  # (both Python/FastAPI-ish apps, sharing the same instrumentation shape - request duration
+  # histogram {method,route} plus a requests_total counter with a status_class tag, and the
+  # standard Python GC meter). Verified live tonight against both scrape jobs. The task's
+  # illustrative "upstream requests by target/outcome", "deliveries by outcome" and "intents by
+  # intent/outcome" panels are deliberately NOT included: no such metrics exist in either job's
+  # live inventory (only request_duration_seconds_* and requests_total are exported) - adding
+  # them would just produce "No Data" panels.
+  studylife-addons.json: |
+    {
+      "title": "StudyLife Add-ons",
+      "uid": "studylife-addons",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "30s",
+      "description": "HTTP and Python-runtime health of the two StudyLife companion services: studylife-webhooks (outbound event delivery) and studylife-alexa (the Alexa skill backend). Both only export request_duration_seconds_bucket/_count/_sum{method,route}, requests_total{method,route,status_class} and the standard python_gc_* meter - checked against tonight's live inventory.",
+      "panels": [
+        { "id": 1, "title": "Webhooks", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] },
+        { "id": 2, "title": "Request rate by route and method", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+          "targets": [{ "expr": "sum by (route, method) (rate(studylife_webhooks_requests_total[5m]))", "legendFormat": "{{method}} {{route}}", "refId": "A" }] },
+        { "id": 3, "title": "p95 latency by route", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, route) (rate(studylife_webhooks_request_duration_seconds_bucket[5m])))", "legendFormat": "{{route}}", "refId": "A" }] },
+        { "id": 4, "title": "Status-class share", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "custom": { "stacking": { "mode": "normal" } } } },
+          "targets": [{ "expr": "sum by (status_class) (rate(studylife_webhooks_requests_total[5m])) / ignoring(status_class) group_left sum(rate(studylife_webhooks_requests_total[5m])) or vector(0)", "legendFormat": "{{status_class}}", "refId": "A" }] },
+        { "id": 5, "title": "Scrape health per pod", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 0, "y": 9 },
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "up{job=\"studylife-webhooks\"}", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 6, "title": "Python GC collections rate by generation", "type": "timeseries", "gridPos": { "h": 6, "w": 9, "x": 6, "y": 9 },
+          "targets": [{ "expr": "sum by (generation) (rate(python_gc_collections_total{job=\"studylife-webhooks\"}[5m]))", "legendFormat": "gen{{generation}}", "refId": "A" }] },
+        { "id": 7, "title": "Python GC objects rate (collected/uncollectable)", "type": "timeseries", "gridPos": { "h": 6, "w": 9, "x": 15, "y": 9 },
+          "targets": [
+            { "expr": "sum(rate(python_gc_objects_collected_total{job=\"studylife-webhooks\"}[5m]))", "legendFormat": "collected", "refId": "A" },
+            { "expr": "sum(rate(python_gc_objects_uncollectable_total{job=\"studylife-webhooks\"}[5m]))", "legendFormat": "uncollectable", "refId": "B" }
+          ] },
+        { "id": 8, "title": "Alexa", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }, "panels": [] },
+        { "id": 9, "title": "Request rate by route and method", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+          "targets": [{ "expr": "sum by (route, method) (rate(studylife_alexa_requests_total[5m]))", "legendFormat": "{{method}} {{route}}", "refId": "A" }] },
+        { "id": 10, "title": "p95 latency by route", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, route) (rate(studylife_alexa_request_duration_seconds_bucket[5m])))", "legendFormat": "{{route}}", "refId": "A" }] },
+        { "id": 11, "title": "Status-class share", "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "custom": { "stacking": { "mode": "normal" } } } },
+          "targets": [{ "expr": "sum by (status_class) (rate(studylife_alexa_requests_total[5m])) / ignoring(status_class) group_left sum(rate(studylife_alexa_requests_total[5m])) or vector(0)", "legendFormat": "{{status_class}}", "refId": "A" }] },
+        { "id": 12, "title": "Scrape health per pod", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 0, "y": 24 },
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [{ "expr": "up{job=\"studylife-alexa\"}", "legendFormat": "{{pod}}", "refId": "A" }] },
+        { "id": 13, "title": "Python GC collections rate by generation", "type": "timeseries", "gridPos": { "h": 6, "w": 9, "x": 6, "y": 24 },
+          "targets": [{ "expr": "sum by (generation) (rate(python_gc_collections_total{job=\"studylife-alexa\"}[5m]))", "legendFormat": "gen{{generation}}", "refId": "A" }] },
+        { "id": 14, "title": "Python GC objects rate (collected/uncollectable)", "type": "timeseries", "gridPos": { "h": 6, "w": 9, "x": 15, "y": 24 },
+          "targets": [
+            { "expr": "sum(rate(python_gc_objects_collected_total{job=\"studylife-alexa\"}[5m]))", "legendFormat": "collected", "refId": "A" },
+            { "expr": "sum(rate(python_gc_objects_uncollectable_total{job=\"studylife-alexa\"}[5m]))", "legendFormat": "uncollectable", "refId": "B" }
+          ] },
+        { "id": 15, "title": "Runtime info", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 }, "panels": [] },
+        { "id": 16, "title": "Python build info (Webhooks & Alexa)", "type": "table", "gridPos": { "h": 6, "w": 24, "x": 0, "y": 31 },
+          "targets": [{ "expr": "python_info{job=~\"studylife-webhooks|studylife-alexa\"}", "format": "table", "instant": true, "refId": "A" }] }
       ]
     }
   npm.json: |
