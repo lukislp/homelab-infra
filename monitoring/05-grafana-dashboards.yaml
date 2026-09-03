@@ -508,7 +508,7 @@ data:
         { "id": 29, "title": "Peak memory p95 (native app)", "type": "timeseries", "gridPos": { "h": 7, "w": 6, "x": 12, "y": 64 },
           "description": "95th percentile of MetricKit's daily peak memory sample (studylife_client_app_resource_peak_memory_mb, values already in MB - unconfirmed metric name, no live data yet).",
           "fieldConfig": { "defaults": { "unit": "decmbytes" } },
-          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_client_app_resource_peak_memory_mb_bucket{platform=~\"$platform\"}[5m])))", "refId": "A" }] },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_client_app_resource_peak_memory_mb_megabytes_bucket{platform=~\"$platform\"}[5m])))", "refId": "A" }] },
         { "id": 30, "title": "Cellular vs WiFi bytes/day (native app)", "type": "timeseries", "gridPos": { "h": 7, "w": 6, "x": 18, "y": 64 },
           "description": "Average of MetricKit's daily cellular (studylife_client_app_resource_cellular_bytes) vs WiFi (studylife_client_app_resource_wifi_bytes) network usage samples - no live data yet.",
           "fieldConfig": { "defaults": { "unit": "bytes" } },
