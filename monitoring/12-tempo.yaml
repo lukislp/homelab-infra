@@ -144,15 +144,12 @@ spec:
             seccompProfile: { type: RuntimeDefault }
           livenessProbe:
             httpGet: { path: /ready, port: 3200 }
-            initialDelaySeconds: 60
-            periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 6
             initialDelaySeconds: 30
             periodSeconds: 15
           readinessProbe:
             httpGet: { path: /ready, port: 3200 }
-            periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 12
             initialDelaySeconds: 10
