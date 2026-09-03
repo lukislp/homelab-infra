@@ -346,6 +346,178 @@ data:
           "targets": [{ "expr": "dotnet_process_memory_working_set_bytes{job=\"studylife-server\"}", "legendFormat": "{{pod}}", "refId": "A" }] }
       ]
     }
+  # New: dashboard for the CLIENT side of StudyLife's telemetry (phase 2/3 of the plan, see
+  # docs/ARCHITECTURE.md "Telemetry" and StudyLife.Server/Services/ClientTelemetryMetrics.cs) -
+  # everything the browser/WASM app and the native app report about themselves via POST
+  # /api/telemetry, as opposed to studylife-server.json above (what the SERVER measures about
+  # itself). Companion dashboard, same job/scrape surface (port 9464, "studylife-server" job).
+  #
+  # Metric names follow the same OpenTelemetry->Prometheus translation as studylife-server.json:
+  # a dotted instrument name becomes underscored, and a unit suffix is appended UNLESS the name
+  # already ends with that unit word or the unit is a bracketed placeholder like "{boot}"/
+  # "{event}" (dropped entirely - already verified live for studylife_client_boots_total and
+  # studylife_client_push_events_total, both counters with such units). Confirmed live tonight:
+  # studylife_client_api_duration_seconds_*, studylife_client_api_requests_total,
+  # studylife_client_app_launch_webview_duration_seconds_*,
+  # studylife_client_boot_dashboard_ready_duration_seconds_*, studylife_client_boots_total,
+  # studylife_client_health_queries_total, studylife_client_health_query_duration_seconds_*,
+  # studylife_client_navigation_render_duration_seconds_*, studylife_client_push_events_total.
+  # Everything else below (boot html/boot_script/wasm_download/runtime_ready/first_render, vitals,
+  # sse, errors, native app launch cold/warm, app resource) follows the exact same naming rule
+  # from ClientTelemetryMetrics.cs but has no live series yet - flagged per-panel in its
+  # description. Two naming calls made without a live sample to check against: Vitals histograms
+  # are recorded with unit "ms" (unlike the "s"-unit duration histograms elsewhere), so their
+  # Prometheus name gets a "_milliseconds" suffix (studylife_client_vitals_<name>_milliseconds_*),
+  # except CLS (unit "1", unitless, no suffix); and AppResourcePeakMemoryMb's unit "MBy" isn't one
+  # of the small set of units OpenTelemetry's Prometheus exporter recognizes (By/s/ms/us/ns/1/...),
+  # so it passes through unmapped - no suffix added, i.e. studylife_client_app_resource_peak_
+  # memory_mb_bucket, not "..._megabytes_bucket".
+  studylife-client.json: |
+    {
+      "title": "StudyLife Client",
+      "uid": "studylife-client",
+      "schemaVersion": 39,
+      "time": { "from": "now-24h", "to": "now" },
+      "refresh": "1m",
+      "description": "Browser/app telemetry reported BY clients (boot timeline, Web Vitals, client-observed API timings, SSE health, navigation renders, errors, native app launch/resource/health-query/push events) - see StudyLife.Server/Services/ClientTelemetryMetrics.cs and docs/ARCHITECTURE.md \"Telemetry\" phase 2/3, ingested via POST /api/telemetry. Companion to studylife-server.json, which covers what the SERVER measures about itself.",
+      "templating": {
+        "list": [
+          { "name": "platform", "type": "query", "label": "Platform", "query": "label_values(studylife_client_api_requests_total, platform)", "definition": "label_values(studylife_client_api_requests_total, platform)", "multi": true, "includeAll": true, "allValue": ".+", "refresh": 1, "sort": 1, "current": {} }
+        ]
+      },
+      "panels": [
+        { "id": 1, "title": "Start", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] },
+        { "id": 2, "title": "App launch (webview) & boot (dashboard ready) - p50/p95", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+          "description": "How long until the embedded WebView is interactive (studylife_client_app_launch_webview_duration_seconds, native app only) vs. until the dashboard has real data (studylife_client_boot_dashboard_ready_duration_seconds, all platforms).",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_app_launch_webview_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "webview p50", "refId": "A" },
+            { "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_client_app_launch_webview_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "webview p95", "refId": "B" },
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_dashboard_ready_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "dashboard_ready p50", "refId": "C" },
+            { "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_client_boot_dashboard_ready_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "dashboard_ready p95", "refId": "D" }
+          ] },
+        { "id": 3, "title": "Boot phase breakdown (p50)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+          "description": "Median wall time per boot phase, stacked: html (studylife_client_boot_html_duration_seconds), boot script (studylife_client_boot_boot_script_duration_seconds), WASM download (studylife_client_boot_wasm_download_duration_seconds), runtime ready (studylife_client_boot_runtime_ready_duration_seconds), first render (studylife_client_boot_first_render_duration_seconds), dashboard ready (studylife_client_boot_dashboard_ready_duration_seconds). No live data for the first five yet, only dashboard_ready is confirmed live.",
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "stacking": { "mode": "normal" }, "drawStyle": "bars" } } },
+          "targets": [
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_html_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "html", "refId": "A" },
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_boot_script_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "boot script", "refId": "B" },
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_wasm_download_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "wasm download", "refId": "C" },
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_runtime_ready_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "runtime ready", "refId": "D" },
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_first_render_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "first render", "refId": "E" },
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_dashboard_ready_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "dashboard ready", "refId": "F" }
+          ] },
+        { "id": 4, "title": "Boots/hour by cold start", "type": "timeseries", "gridPos": { "h": 7, "w": 8, "x": 0, "y": 9 },
+          "description": "Client boots per hour split by the \"cold\" tag on studylife_client_boots_total (cold=true = full asset download, false = warm/cached boot).",
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "drawStyle": "bars" } } },
+          "targets": [{ "expr": "sum by (cold) (increase(studylife_client_boots_total{platform=~\"$platform\"}[1h]))", "legendFormat": "cold={{cold}}", "refId": "A" }] },
+        { "id": 5, "title": "Boots/hour by service-worker cache hit", "type": "timeseries", "gridPos": { "h": 7, "w": 8, "x": 8, "y": 9 },
+          "description": "Client boots per hour split by the \"sw_cache_hit\" tag on studylife_client_boots_total (whether the service worker served the shell from its cache).",
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "drawStyle": "bars" } } },
+          "targets": [{ "expr": "sum by (sw_cache_hit) (increase(studylife_client_boots_total{platform=~\"$platform\"}[1h]))", "legendFormat": "sw_cache_hit={{sw_cache_hit}}", "refId": "A" }] },
+        { "id": 6, "title": "Avg cold start (dashboard ready)", "type": "stat", "gridPos": { "h": 7, "w": 8, "x": 16, "y": 9 },
+          "description": "Median dashboard-ready duration restricted to cold=true boots (studylife_client_boot_dashboard_ready_duration_seconds{cold=\"true\"}) - the worst-case \"how long did a fresh visitor wait\" number.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_boot_dashboard_ready_duration_seconds_bucket{platform=~\"$platform\",cold=\"true\"}[5m])))", "refId": "A" }] },
+        { "id": 7, "title": "API as seen by clients", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 }, "panels": [] },
+        { "id": 8, "title": "p95 latency by route (top 10 by rate)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+          "description": "95th percentile of studylife_client_api_duration_seconds (client-observed round-trip), restricted via \"and on(route) topk(10, ...)\" to the 10 routes with the highest request rate so rarely-hit routes don't clutter the legend.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, route) (rate(studylife_client_api_duration_seconds_bucket{platform=~\"$platform\"}[5m]) and on(route) topk(10, sum by (route) (rate(studylife_client_api_duration_seconds_count{platform=~\"$platform\"}[5m])))))", "legendFormat": "{{route}}", "refId": "A" }] },
+        { "id": 9, "title": "Request rate by route", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+          "description": "Client-observed API calls per second per route (studylife_client_api_requests_total, normalized route templates - low cardinality by construction, see TelemetryRouteCatalog).",
+          "targets": [{ "expr": "sum by (route) (rate(studylife_client_api_requests_total{platform=~\"$platform\"}[5m]))", "legendFormat": "{{route}}", "refId": "A" }] },
+        { "id": 10, "title": "304 share (Not Modified)", "type": "stat", "gridPos": { "h": 7, "w": 8, "x": 0, "y": 25 },
+          "description": "Share of client-observed API calls answered 304 Not Modified (studylife_client_api_requests_total{not_modified=\"true\"} / all studylife_client_api_requests_total) - how effective client-side caching is.",
+          "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "yellow", "value": 0.1 }, { "color": "green", "value": 0.3 } ] } } },
+          "targets": [{ "expr": "sum(rate(studylife_client_api_requests_total{platform=~\"$platform\",not_modified=\"true\"}[5m])) / sum(rate(studylife_client_api_requests_total{platform=~\"$platform\"}[5m])) or vector(0)", "refId": "A" }] },
+        { "id": 11, "title": "Error share by status class", "type": "timeseries", "gridPos": { "h": 7, "w": 16, "x": 8, "y": 25 },
+          "description": "Share of client-observed API calls answered 4xx/5xx, derived from the status_class tag on studylife_client_api_duration_seconds_count (client-observed calls, not the server's own http_server_request_duration_seconds).",
+          "fieldConfig": { "defaults": { "unit": "percentunit" } },
+          "targets": [
+            { "expr": "sum(rate(studylife_client_api_duration_seconds_count{platform=~\"$platform\",status_class=\"4xx\"}[5m])) / sum(rate(studylife_client_api_duration_seconds_count{platform=~\"$platform\"}[5m])) or vector(0)", "legendFormat": "4xx", "refId": "A" },
+            { "expr": "sum(rate(studylife_client_api_duration_seconds_count{platform=~\"$platform\",status_class=\"5xx\"}[5m])) / sum(rate(studylife_client_api_duration_seconds_count{platform=~\"$platform\"}[5m])) or vector(0)", "legendFormat": "5xx", "refId": "B" }
+          ] },
+        { "id": 12, "title": "Web Vitals", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 }, "panels": [] },
+        { "id": 13, "title": "LCP p75", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 0, "y": 33 },
+          "description": "75th percentile Largest Contentful Paint (studylife_client_vitals_lcp_milliseconds, unit ms - unconfirmed name, no live data yet). Good < 2.5s.",
+          "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "red", "value": 2500 } ] } } },
+          "targets": [{ "expr": "histogram_quantile(0.75, sum by (le) (rate(studylife_client_vitals_lcp_milliseconds_bucket{platform=~\"$platform\"}[5m])))", "refId": "A" }] },
+        { "id": 14, "title": "INP p75", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 4, "y": 33 },
+          "description": "75th percentile Interaction to Next Paint (studylife_client_vitals_inp_milliseconds, unit ms - unconfirmed name, no live data yet). Good < 0.2s.",
+          "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "red", "value": 200 } ] } } },
+          "targets": [{ "expr": "histogram_quantile(0.75, sum by (le) (rate(studylife_client_vitals_inp_milliseconds_bucket{platform=~\"$platform\"}[5m])))", "refId": "A" }] },
+        { "id": 15, "title": "CLS p75", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 8, "y": 33 },
+          "description": "75th percentile Cumulative Layout Shift (studylife_client_vitals_cls, unitless ratio - unconfirmed name, no live data yet). Good < 0.1.",
+          "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "red", "value": 0.1 } ] } } },
+          "targets": [{ "expr": "histogram_quantile(0.75, sum by (le) (rate(studylife_client_vitals_cls_bucket{platform=~\"$platform\"}[5m])))", "refId": "A" }] },
+        { "id": 16, "title": "FCP p75", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 12, "y": 33 },
+          "description": "75th percentile First Contentful Paint (studylife_client_vitals_fcp_milliseconds, unit ms - unconfirmed name, no live data yet). Good < 1.8s.",
+          "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "red", "value": 1800 } ] } } },
+          "targets": [{ "expr": "histogram_quantile(0.75, sum by (le) (rate(studylife_client_vitals_fcp_milliseconds_bucket{platform=~\"$platform\"}[5m])))", "refId": "A" }] },
+        { "id": 17, "title": "TTFB p75", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 16, "y": 33 },
+          "description": "75th percentile Time To First Byte (studylife_client_vitals_ttfb_milliseconds, unit ms - unconfirmed name, no live data yet). Good < 0.8s.",
+          "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "red", "value": 800 } ] } } },
+          "targets": [{ "expr": "histogram_quantile(0.75, sum by (le) (rate(studylife_client_vitals_ttfb_milliseconds_bucket{platform=~\"$platform\"}[5m])))", "refId": "A" }] },
+        { "id": 18, "title": "Errors & Realtime", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 }, "panels": [] },
+        { "id": 19, "title": "Client errors/hour by kind", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+          "description": "Client-reported errors per hour by the \"kind\" tag on studylife_client_errors_total (dotnet/js/native_crash/native_hang/native_anr) - unconfirmed metric name, no live data yet.",
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "drawStyle": "bars" } } },
+          "targets": [{ "expr": "sum by (kind) (increase(studylife_client_errors_total{platform=~\"$platform\"}[1h]))", "legendFormat": "{{kind}}", "refId": "A" }] },
+        { "id": 20, "title": "Client errors/hour by type (top 10)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+          "description": "Client-reported errors per hour by the \"type\" tag (exception type name) on studylife_client_errors_total, restricted to the 10 most frequent types - unconfirmed metric name, no live data yet.",
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "drawStyle": "bars" } } },
+          "targets": [{ "expr": "topk(10, sum by (type) (increase(studylife_client_errors_total{platform=~\"$platform\"}[1h])))", "legendFormat": "{{type}}", "refId": "A" }] },
+        { "id": 21, "title": "Fatal share", "type": "stat", "gridPos": { "h": 7, "w": 6, "x": 0, "y": 48 },
+          "description": "Share of studylife_client_errors_total tagged fatal=true - never sampled out per ClientTelemetryMetrics.cs, so this ratio is exact, not an estimate.",
+          "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 0.05 }, { "color": "red", "value": 0.2 } ] } } },
+          "targets": [{ "expr": "sum(rate(studylife_client_errors_total{platform=~\"$platform\",fatal=\"true\"}[5m])) / sum(rate(studylife_client_errors_total{platform=~\"$platform\"}[5m])) or vector(0)", "refId": "A" }] },
+        { "id": 22, "title": "SSE events by type", "type": "timeseries", "gridPos": { "h": 7, "w": 9, "x": 6, "y": 48 },
+          "description": "Client-observed SSE change-stream lifecycle events per second by the \"event\" tag on studylife_client_sse_events_total (connected/reconnect/fallback_poll/closed) - unconfirmed metric name, no live data yet.",
+          "targets": [{ "expr": "sum by (event) (rate(studylife_client_sse_events_total{platform=~\"$platform\"}[5m]))", "legendFormat": "{{event}}", "refId": "A" }] },
+        { "id": 23, "title": "Navigation render p95 by page", "type": "timeseries", "gridPos": { "h": 7, "w": 9, "x": 15, "y": 48 },
+          "description": "95th percentile time from NavigationManager.LocationChanged to the next render (studylife_client_navigation_render_duration_seconds), by Blazor route (\"page\" tag).",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, page) (rate(studylife_client_navigation_render_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "{{page}}", "refId": "A" }] },
+        { "id": 24, "title": "Native app", "type": "row", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 55 }, "panels": [] },
+        { "id": 25, "title": "Health query p95 by kind", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 },
+          "description": "95th percentile HealthKit query wall time (studylife_client_health_query_duration_seconds) by kind (hrv/sleep/steps/vo2max).",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(studylife_client_health_query_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "{{kind}}", "refId": "A" }] },
+        { "id": 26, "title": "Health query results by result/authorization", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
+          "description": "HealthKit queries per second (studylife_client_health_queries_total) stacked by result (error/empty/below_minimum/sufficient) and authorization (granted/denied/undetermined) - never a sample/night count or health value, per docs/ARCHITECTURE.md.",
+          "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" } } } },
+          "targets": [{ "expr": "sum by (result, authorization) (rate(studylife_client_health_queries_total{platform=~\"$platform\"}[5m]))", "legendFormat": "{{result}} / {{authorization}}", "refId": "A" }] },
+        { "id": 27, "title": "Push events by type", "type": "timeseries", "gridPos": { "h": 7, "w": 6, "x": 0, "y": 64 },
+          "description": "Native push lifecycle events per second by the \"event\" tag on studylife_client_push_events_total (registered/received/shown).",
+          "targets": [{ "expr": "sum by (event) (rate(studylife_client_push_events_total{platform=~\"$platform\"}[5m]))", "legendFormat": "{{event}}", "refId": "A" }] },
+        { "id": 28, "title": "App launch cold/warm (p50)", "type": "timeseries", "gridPos": { "h": 7, "w": 6, "x": 6, "y": 64 },
+          "description": "Median native app launch time, cold (studylife_client_app_launch_cold_duration_seconds) vs. warm (studylife_client_app_launch_warm_duration_seconds) - unconfirmed metric names, no live data yet.",
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_app_launch_cold_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "cold", "refId": "A" },
+            { "expr": "histogram_quantile(0.5, sum by (le) (rate(studylife_client_app_launch_warm_duration_seconds_bucket{platform=~\"$platform\"}[5m])))", "legendFormat": "warm", "refId": "B" }
+          ] },
+        { "id": 29, "title": "Peak memory p95 (native app)", "type": "timeseries", "gridPos": { "h": 7, "w": 6, "x": 12, "y": 64 },
+          "description": "95th percentile of MetricKit's daily peak memory sample (studylife_client_app_resource_peak_memory_mb, values already in MB - unconfirmed metric name, no live data yet).",
+          "fieldConfig": { "defaults": { "unit": "decmbytes" } },
+          "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(studylife_client_app_resource_peak_memory_mb_bucket{platform=~\"$platform\"}[5m])))", "refId": "A" }] },
+        { "id": 30, "title": "Cellular vs WiFi bytes/day (native app)", "type": "timeseries", "gridPos": { "h": 7, "w": 6, "x": 18, "y": 64 },
+          "description": "Average of MetricKit's daily cellular (studylife_client_app_resource_cellular_bytes) vs WiFi (studylife_client_app_resource_wifi_bytes) network usage samples - no live data yet.",
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [
+            { "expr": "sum(increase(studylife_client_app_resource_cellular_bytes_sum{platform=~\"$platform\"}[1d])) / sum(increase(studylife_client_app_resource_cellular_bytes_count{platform=~\"$platform\"}[1d])) or vector(0)", "legendFormat": "cellular", "refId": "A" },
+            { "expr": "sum(increase(studylife_client_app_resource_wifi_bytes_sum{platform=~\"$platform\"}[1d])) / sum(increase(studylife_client_app_resource_wifi_bytes_count{platform=~\"$platform\"}[1d])) or vector(0)", "legendFormat": "wifi", "refId": "B" }
+          ] }
+      ]
+    }
   npm.json: |
     {
       "title": "Nginx Proxy Manager (extern)",
