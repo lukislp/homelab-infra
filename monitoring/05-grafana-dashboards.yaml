@@ -259,11 +259,11 @@ data:
   # (http.server.request.duration, aspnetcore.rate_limiting.*, kestrel.active_connections) match
   # both PR #139's Program.cs (AddAspNetCoreInstrumentation + AddMeter("Microsoft.AspNetCore.
   # RateLimiting", "Microsoft.AspNetCore.Server.Kestrel")) and the OpenTelemetry/ASP.NET Core
-  # source. The GC/working-set panel uses process_runtime_dotnet_gc_committed_memory_size_bytes
-  # as a verified stand-in: PR #139 pulls in OpenTelemetry.Instrumentation.Runtime 1.18.0 exactly
-  # (csproj), whose only metrics are the process.runtime.dotnet.* family (confirmed against
-  # github.com/open-telemetry/opentelemetry-dotnet-contrib) - it exports no working-set metric at
-  # all (that needs the separate, unused OpenTelemetry.Instrumentation.Process package instead).
+  # source. The runtime panels use the names a live scrape of the server actually exports:
+  # OpenTelemetry.Instrumentation.Runtime 1.18 re-exports the .NET System.Runtime meter, so
+  # the family is dotnet_* (dotnet_gc_last_collection_heap_size_bytes by gc_heap_generation,
+  # dotnet_process_memory_working_set_bytes, dotnet_gc_pause_time_seconds_total, ...), NOT the
+  # older process_runtime_dotnet_* names from the contrib README.
   studylife-server.json: |
     {
       "title": "StudyLife Server",
@@ -337,13 +337,13 @@ data:
           "description": "kestrel.active_connections (ASP.NET Core's built-in Kestrel meter) per pod.",
           "targets": [{ "expr": "sum by (pod) (kestrel_active_connections{job=\"studylife-server\"})", "legendFormat": "{{pod}}", "refId": "A" }] },
         { "id": 20, "title": ".NET GC heap size by generation", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 58 },
-          "description": "process.runtime.dotnet.gc.heap.size (OpenTelemetry.Instrumentation.Runtime 1.18) by generation (gen0/gen1/gen2/loh/poh), summed across all pods.",
+          "description": "dotnet.gc.last_collection.heap.size (OpenTelemetry.Instrumentation.Runtime 1.18 re-exports the .NET 9+ System.Runtime meter, names verified against a live scrape) by generation (gen0/gen1/gen2/loh/poh), summed across all pods.",
           "fieldConfig": { "defaults": { "unit": "bytes" } },
-          "targets": [{ "expr": "sum by (generation) (process_runtime_dotnet_gc_heap_size_bytes{job=\"studylife-server\"})", "legendFormat": "{{generation}}", "refId": "A" }] },
-        { "id": 21, "title": "Committed memory (GC) - working-set proxy", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 58 },
-          "description": "process.runtime.dotnet.gc.committed_memory.size per pod - the Runtime instrumentation exports no real working-set metric (that would need the separate OpenTelemetry.Instrumentation.Process package's process.memory.usage instead); this is the closest verified stand-in.",
+          "targets": [{ "expr": "sum by (gc_heap_generation) (dotnet_gc_last_collection_heap_size_bytes{job=\"studylife-server\"})", "legendFormat": "{{gc_heap_generation}}", "refId": "A" }] },
+        { "id": 21, "title": "Process working set", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 58 },
+          "description": "dotnet.process.memory.working_set per pod (verified live) - compare against the container memory limit (web 1200Mi, worker 256Mi) to spot pods drifting towards an OOM kill.",
           "fieldConfig": { "defaults": { "unit": "bytes" } },
-          "targets": [{ "expr": "process_runtime_dotnet_gc_committed_memory_size_bytes{job=\"studylife-server\"}", "legendFormat": "{{pod}}", "refId": "A" }] }
+          "targets": [{ "expr": "dotnet_process_memory_working_set_bytes{job=\"studylife-server\"}", "legendFormat": "{{pod}}", "refId": "A" }] }
       ]
     }
   npm.json: |
