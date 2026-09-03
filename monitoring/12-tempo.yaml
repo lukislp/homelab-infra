@@ -23,6 +23,19 @@ data:
             http:
               endpoint: 0.0.0.0:4318
 
+    # Small blocks and a small worker pool: keeps the memory spikes of block completion
+
+    # well below the 768Mi limit on a Pi node (2026-09-04 OOM loop at 384Mi).
+
+    ingester:
+
+      max_block_duration: 10m
+
+      max_block_bytes: 52428800
+
+      complete_block_timeout: 5m
+
+
     compactor:
       compaction:
         block_retention: 168h # 7 days, limits growth to the Pi's storage budget - same as Loki
@@ -111,8 +124,11 @@ spec:
             - { name: otlp-http, containerPort: 4318 }
             - { name: query, containerPort: 3200 }
           resources:
-            requests: { cpu: 50m, memory: 128Mi }
-            limits: { cpu: 300m, memory: 384Mi }
+            # OOMKilled 8x at 384Mi on the first evening (block completion + WAL replay spikes) -
+            # 768Mi gives the vParquet block writer headroom; the ingester limits below keep the
+            # spikes small in the first place.
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { cpu: 300m, memory: 768Mi }
           volumeMounts:
             - { name: config, mountPath: /etc/tempo }
             - { name: data, mountPath: /var/tempo }
@@ -128,10 +144,17 @@ spec:
             seccompProfile: { type: RuntimeDefault }
           livenessProbe:
             httpGet: { path: /ready, port: 3200 }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
             initialDelaySeconds: 30
             periodSeconds: 15
           readinessProbe:
             httpGet: { path: /ready, port: 3200 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
             initialDelaySeconds: 10
             periodSeconds: 5
       volumes:
