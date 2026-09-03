@@ -134,6 +134,40 @@ data:
             replacement: "${1}:8000"
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
+      # studylife-webhooks (separate repo/namespace, see its own k8s/03-app.yaml) - webhook
+      # delivery outcome/attempt counters plus HTTP request rate/latency/status
+      # (studylife_webhooks_*, hand-registered in metrics.py), exposed on the app's own port
+      # 8000 at /metrics. Reached directly pod-to-pod like every job on this page.
+      - job_name: studylife-webhooks
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [studylife-webhooks] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: studylife-webhooks
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:8000"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+      # studylife-alexa (separate repo/namespace, see its own k8s/03-app.yaml) - Alexa intent
+      # counters plus HTTP request rate/latency/status (studylife_alexa_*, hand-registered in
+      # metrics.py), exposed on the app's own port 8000 at /metrics. Reached directly
+      # pod-to-pod like every job on this page.
+      - job_name: studylife-alexa
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [studylife-alexa] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: studylife-alexa
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:8000"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
       # studylife-server (main repo, namespace studylife-scale) - .NET/OpenTelemetry metrics
       # (HTTP request duration/status, rate-limiter, cache, SSE, TTS, webhooks, worker tick,
       # Kestrel/.NET runtime) exported on a dedicated metrics-only listener, port 9464, path
