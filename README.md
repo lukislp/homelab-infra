@@ -42,6 +42,33 @@ its own hostname, and NetworkPolicy scoped to its own namespace.
 3. `studylife/k8s/bootstrap-cluster.ps1` — studylife's own app manifests.
 4. Each other app's own bootstrap step, documented in its own repo.
 
+## Image cache: embedded registry mirror
+
+The three nodes pull every new `studylife-server` release from ghcr.io separately (about 400 MB,
+10-13 s per node measured on 2026-09-05), and an HPA scale-up onto a node that has not seen the
+current version yet pulls it again from the internet. k3s ships a distributed OCI mirror
+(`embedded-registry: true`, Spegel): nodes serve image layers they already have to each other
+over the LAN (TCP 5001), so only the first node fetches from upstream and the others get the
+image in seconds. `provisioning/k3s/config.yaml` and `provisioning/k3s/registries.yaml` are the
+node files; `setup-node.sh` writes them for new nodes.
+
+Enable it on the existing nodes (needs SSH to each Pi; server first, then the agents - each
+restart is a few seconds of API unavailability on the server, running pods are not affected):
+
+```bash
+# on pinode01 (server), then pinode02 and pinode03 (agents)
+sudo mkdir -p /etc/rancher/k3s
+grep -q '^embedded-registry:' /etc/rancher/k3s/config.yaml 2>/dev/null || echo 'embedded-registry: true' | sudo tee -a /etc/rancher/k3s/config.yaml
+# merge the mirrors: section of provisioning/k3s/registries.yaml into /etc/rancher/k3s/registries.yaml
+# (keep the existing configs: block with the registry credentials as it is)
+sudo systemctl restart k3s        # pinode01
+sudo systemctl restart k3s-agent  # pinode02 / pinode03
+```
+
+Verify from any machine with kubectl: `kubectl get nodes` stays Ready, and after the next release
+the `Pulled` events on the second and third node show pull times of a few seconds instead of
+10+ s (`kubectl -n studylife-scale get events --field-selector reason=Pulled`).
+
 ## Tracing
 
 Phase 4 of the StudyLife telemetry rollout adds distributed tracing alongside the existing

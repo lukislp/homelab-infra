@@ -87,6 +87,13 @@ else
 fi
 
 echo "=== [3/5] Setting up registry access (/etc/rancher/k3s/registries.yaml) ==="
+# Embedded registry mirror (see provisioning/k3s/config.yaml for the why): the same config.yaml
+# on every node, written before k3s starts so the first start already joins the mirror.
+sudo mkdir -p /etc/rancher/k3s
+if [[ ! -f /etc/rancher/k3s/config.yaml ]] || ! grep -q "^embedded-registry:" /etc/rancher/k3s/config.yaml; then
+  echo "embedded-registry: true" | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null
+  echo "config.yaml: embedded-registry enabled."
+fi
 REGISTRY_HOST="registry.example.com"
 if [[ -f /etc/rancher/k3s/registries.yaml ]]; then
   echo "/etc/rancher/k3s/registries.yaml already exists - skipping (delete it to be asked again)."
@@ -104,6 +111,15 @@ mirrors:
   "${REGISTRY_HOST}":
     endpoint:
       - "https://${REGISTRY_HOST}"
+  ghcr.io:
+    endpoint:
+      - "https://ghcr.io"
+  docker.io:
+    endpoint:
+      - "https://registry-1.docker.io"
+  quay.io:
+    endpoint:
+      - "https://quay.io"
 configs:
   "${REGISTRY_HOST}":
     auth:
