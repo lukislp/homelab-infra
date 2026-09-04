@@ -1,0 +1,10 @@
+# /etc/rancher/k3s/config.yaml - identical on every node (server and agents).
+#
+# embedded-registry: k3s' built-in distributed OCI mirror (Spegel). Every node that already has
+# an image layer serves it to the other nodes over the LAN (port 5001), so after ONE node pulled
+# a new studylife-server release from ghcr.io (~400 MB, 10-13 s measured on 2026-09-05), the
+# HPA surge pods and the rolling update on the other nodes fetch it from that node in seconds
+# instead of each pulling from the internet again. Which registries are shared is listed in
+# registries.yaml (mirrors:). Requires k3s >= v1.29 (cluster runs v1.36) and TCP 5001 + 6443
+# open between the nodes.
+embedded-registry: true

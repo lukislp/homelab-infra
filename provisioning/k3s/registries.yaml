@@ -1,0 +1,18 @@
+# /etc/rancher/k3s/registries.yaml - identical on every node.
+#
+# mirrors: every registry listed here is served through the embedded registry mirror (see
+# config.yaml, embedded-registry: true): a node first asks the other cluster nodes for the
+# image and only falls back to the upstream endpoint when none of them has it yet.
+# configs: credentials for private pulls stay per node (setup-node.sh writes them from the
+# interactive prompt); an empty configs section is fine when everything pulled is public.
+mirrors:
+  ghcr.io:
+    endpoint:
+      - "https://ghcr.io"
+  docker.io:
+    endpoint:
+      - "https://registry-1.docker.io"
+  quay.io:
+    endpoint:
+      - "https://quay.io"
+configs: {}
