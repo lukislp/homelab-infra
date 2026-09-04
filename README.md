@@ -57,15 +57,41 @@ for the whole cluster, and k3s-agent does not accept the key (an agent with that
 config.yaml fails to start - hit live on pinode02, 2026-09-05). Agents only need the registries
 listed under `mirrors:` in their registries.yaml, which setup-node.sh already writes.
 
+Both files are required: without a `registries.yaml` that lists registries under `mirrors:`,
+k3s logs "Not starting distributed registry mirror: no registries configured" and nothing
+listens on 5001 - exactly what happened on pinode01 on 2026-09-05, because setup-node.sh only
+writes registries.yaml when registry credentials are entered, so nodes that pull public images
+never had one.
+
 ```bash
-# pinode01 (server) only
+# every node: the mirror list (identical everywhere; add a configs: block with credentials
+# for private registries, see provisioning/k3s/registries.yaml)
 sudo mkdir -p /etc/rancher/k3s
+sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<'REG'
+mirrors:
+  ghcr.io:
+    endpoint:
+      - "https://ghcr.io"
+  docker.io:
+    endpoint:
+      - "https://registry-1.docker.io"
+  quay.io:
+    endpoint:
+      - "https://quay.io"
+REG
+sudo chmod 600 /etc/rancher/k3s/registries.yaml
+
+# pinode01 (server) only: the cluster-wide flag
 grep -q '^embedded-registry:' /etc/rancher/k3s/config.yaml 2>/dev/null || echo 'embedded-registry: true' | sudo tee -a /etc/rancher/k3s/config.yaml
 sudo systemctl restart k3s
 
-# pinode02 / pinode03 (agents): no config.yaml change, just pick up the setting
+# pinode02 / pinode03 (agents): no config.yaml change
 sudo systemctl restart k3s-agent
 ```
+
+Check on the server: `sudo ss -ltnp | grep ':5001'` shows the mirror listening and
+`sudo journalctl -u k3s | grep -i 'distributed registry'` reports "Starting distributed
+registry mirror".
 
 Verify from any machine with kubectl: `kubectl get nodes` stays Ready, and after the next release
 the `Pulled` events on the second and third node show pull times of a few seconds instead of
