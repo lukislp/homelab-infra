@@ -49,21 +49,49 @@ The three nodes pull every new `studylife-server` release from ghcr.io separatel
 current version yet pulls it again from the internet. k3s ships a distributed OCI mirror
 (`embedded-registry: true`, Spegel): nodes serve image layers they already have to each other
 over the LAN (TCP 5001), so only the first node fetches from upstream and the others get the
-image in seconds. `provisioning/k3s/config.yaml` and `provisioning/k3s/registries.yaml` are the
-node files; `setup-node.sh` writes them for new nodes.
+image in seconds. `provisioning/k3s/config.yaml` (server only) and `provisioning/k3s/registries.yaml` (every
+node) are the node files; `setup-node.sh` writes them for new nodes.
 
-Enable it on the existing nodes (needs SSH to each Pi; server first, then the agents - each
-restart is a few seconds of API unavailability on the server, running pods are not affected):
+Enable it on the existing nodes. `embedded-registry` is a SERVER flag: it turns the mirror on
+for the whole cluster, and k3s-agent does not accept the key (an agent with that line in its
+config.yaml fails to start - hit live on pinode02, 2026-09-05). Agents only need the registries
+listed under `mirrors:` in their registries.yaml, which setup-node.sh already writes.
+
+Both files are required: without a `registries.yaml` that lists registries under `mirrors:`,
+k3s logs "Not starting distributed registry mirror: no registries configured" and nothing
+listens on 5001 - exactly what happened on pinode01 on 2026-09-05, because setup-node.sh only
+writes registries.yaml when registry credentials are entered, so nodes that pull public images
+never had one.
 
 ```bash
-# on pinode01 (server), then pinode02 and pinode03 (agents)
+# every node: the mirror list (identical everywhere; add a configs: block with credentials
+# for private registries, see provisioning/k3s/registries.yaml)
 sudo mkdir -p /etc/rancher/k3s
+sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<'REG'
+mirrors:
+  ghcr.io:
+    endpoint:
+      - "https://ghcr.io"
+  docker.io:
+    endpoint:
+      - "https://registry-1.docker.io"
+  quay.io:
+    endpoint:
+      - "https://quay.io"
+REG
+sudo chmod 600 /etc/rancher/k3s/registries.yaml
+
+# pinode01 (server) only: the cluster-wide flag
 grep -q '^embedded-registry:' /etc/rancher/k3s/config.yaml 2>/dev/null || echo 'embedded-registry: true' | sudo tee -a /etc/rancher/k3s/config.yaml
-# merge the mirrors: section of provisioning/k3s/registries.yaml into /etc/rancher/k3s/registries.yaml
-# (keep the existing configs: block with the registry credentials as it is)
-sudo systemctl restart k3s        # pinode01
-sudo systemctl restart k3s-agent  # pinode02 / pinode03
+sudo systemctl restart k3s
+
+# pinode02 / pinode03 (agents): no config.yaml change
+sudo systemctl restart k3s-agent
 ```
+
+Check on the server: `sudo ss -ltnp | grep ':5001'` shows the mirror listening and
+`sudo journalctl -u k3s | grep -i 'distributed registry'` reports "Starting distributed
+registry mirror".
 
 Verify from any machine with kubectl: `kubectl get nodes` stays Ready, and after the next release
 the `Pulled` events on the second and third node show pull times of a few seconds instead of

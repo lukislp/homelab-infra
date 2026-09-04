@@ -90,27 +90,33 @@ echo "=== [3/5] Setting up registry access (/etc/rancher/k3s/registries.yaml) ==
 # Embedded registry mirror (see provisioning/k3s/config.yaml for the why): the same config.yaml
 # on every node, written before k3s starts so the first start already joins the mirror.
 sudo mkdir -p /etc/rancher/k3s
-if [[ ! -f /etc/rancher/k3s/config.yaml ]] || ! grep -q "^embedded-registry:" /etc/rancher/k3s/config.yaml; then
-  echo "embedded-registry: true" | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null
-  echo "config.yaml: embedded-registry enabled."
+if [[ "$ROLE" == "server" ]]; then
+  # Server flag only - k3s-agent does not accept it and would fail to start.
+  if [[ ! -f /etc/rancher/k3s/config.yaml ]] || ! grep -q "^embedded-registry:" /etc/rancher/k3s/config.yaml; then
+    echo "embedded-registry: true" | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null
+    echo "config.yaml: embedded-registry enabled."
+  fi
 fi
 REGISTRY_HOST="registry.example.com"
+# The embedded registry mirror (config.yaml on the server) only serves registries listed under
+# mirrors: - so every node gets a registries.yaml even when no credentials are entered; the
+# configs: block below is only added for a private registry.
 if [[ -f /etc/rancher/k3s/registries.yaml ]]; then
   echo "/etc/rancher/k3s/registries.yaml already exists - skipping (delete it to be asked again)."
 else
+  # Credentials are optional: leave both empty for nodes that only pull public images. The
+  # mirror list is written either way, because without it the embedded registry mirror does
+  # not start ("no registries configured for distributed mirroring").
   if [[ -z "${REGISTRY_USER:-}" ]]; then
-    read -r -p "Registry username for ${REGISTRY_HOST}: " REGISTRY_USER
+    read -r -p "Registry username for ${REGISTRY_HOST} (empty = public images only): " REGISTRY_USER
   fi
-  if [[ -z "${REGISTRY_PASSWORD:-}" ]]; then
+  if [[ -n "${REGISTRY_USER}" && -z "${REGISTRY_PASSWORD:-}" ]]; then
     read -r -s -p "Registry password for ${REGISTRY_HOST}: " REGISTRY_PASSWORD
     echo
   fi
   sudo mkdir -p /etc/rancher/k3s
   sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<EOF
 mirrors:
-  "${REGISTRY_HOST}":
-    endpoint:
-      - "https://${REGISTRY_HOST}"
   ghcr.io:
     endpoint:
       - "https://ghcr.io"
@@ -120,12 +126,19 @@ mirrors:
   quay.io:
     endpoint:
       - "https://quay.io"
+EOF
+  if [[ -n "${REGISTRY_USER}" ]]; then
+    sudo tee -a /etc/rancher/k3s/registries.yaml >/dev/null <<EOF
+  "${REGISTRY_HOST}":
+    endpoint:
+      - "https://${REGISTRY_HOST}"
 configs:
   "${REGISTRY_HOST}":
     auth:
       username: "${REGISTRY_USER}"
       password: "${REGISTRY_PASSWORD}"
 EOF
+  fi
   sudo chmod 600 /etc/rancher/k3s/registries.yaml
   echo "registries.yaml written."
 fi
