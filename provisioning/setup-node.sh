@@ -90,9 +90,12 @@ echo "=== [3/5] Setting up registry access (/etc/rancher/k3s/registries.yaml) ==
 # Embedded registry mirror (see provisioning/k3s/config.yaml for the why): the same config.yaml
 # on every node, written before k3s starts so the first start already joins the mirror.
 sudo mkdir -p /etc/rancher/k3s
-if [[ ! -f /etc/rancher/k3s/config.yaml ]] || ! grep -q "^embedded-registry:" /etc/rancher/k3s/config.yaml; then
-  echo "embedded-registry: true" | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null
-  echo "config.yaml: embedded-registry enabled."
+if [[ "$ROLE" == "server" ]]; then
+  # Server flag only - k3s-agent does not accept it and would fail to start.
+  if [[ ! -f /etc/rancher/k3s/config.yaml ]] || ! grep -q "^embedded-registry:" /etc/rancher/k3s/config.yaml; then
+    echo "embedded-registry: true" | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null
+    echo "config.yaml: embedded-registry enabled."
+  fi
 fi
 REGISTRY_HOST="registry.example.com"
 if [[ -f /etc/rancher/k3s/registries.yaml ]]; then

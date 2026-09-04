@@ -1,4 +1,5 @@
-# /etc/rancher/k3s/config.yaml - identical on every node (server and agents).
+# /etc/rancher/k3s/config.yaml - SERVER node only (pinode01). embedded-registry is a server
+# flag that enables the mirror cluster-wide; k3s-agent rejects the key and fails to start.
 #
 # embedded-registry: k3s' built-in distributed OCI mirror (Spegel). Every node that already has
 # an image layer serves it to the other nodes over the LAN (port 5001), so after ONE node pulled
