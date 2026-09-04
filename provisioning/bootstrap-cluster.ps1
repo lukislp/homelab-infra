@@ -65,6 +65,12 @@ Write-Host "=== [2/6] CloudNativePG operator ==="
 # just studylife, hence living here rather than in any single app's bootstrap script.
 kubectl apply --server-side -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.29/releases/cnpg-1.29.1.yaml
 Wait-Deployment -Namespace "cnpg-system" -Name "cnpg-controller-manager"
+# The upstream manifest ships the operator with a 100m CPU limit and 1-second probes. On this
+# cluster that was the amplifier of the 2026-09-04 incident: under node load the probes timed out,
+# the kubelet restarted the operator mid-failover (29 restarts), and every restart re-initiated a
+# Postgres failover that never completed. Same values as the live hotfix applied that night.
+kubectl -n cnpg-system patch deploy cnpg-controller-manager --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/resources","value":{"requests":{"cpu":"200m","memory":"200Mi"},"limits":{"cpu":"500m","memory":"400Mi"}}},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/timeoutSeconds","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/failureThreshold","value":6},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/timeoutSeconds","value":5}]'
+Wait-Deployment -Namespace "cnpg-system" -Name "cnpg-controller-manager"
 
 Write-Host ""
 Write-Host "=== [3/6] Installing MetalLB ==="
