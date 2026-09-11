@@ -1,5 +1,7 @@
 # homelab-infra
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/lukislp/homelab-infra/badge)](https://scorecard.dev/viewer/?uri=github.com/lukislp/homelab-infra)
+
 Cluster-wide Kubernetes infrastructure for the k3s homelab that [studylife](https://github.com/lukislp/studylife),
 [studylife-ai](https://github.com/lukislp/studylife-ai), [studylife-mcp](https://github.com/lukislp/studylife-mcp),
 [piwatch](https://github.com/lukislp/piwatch), and [UnifiProtectDashboard](https://github.com/lukislp/UnifiProtectDashboard)
