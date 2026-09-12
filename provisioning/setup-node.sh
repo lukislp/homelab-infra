@@ -148,11 +148,24 @@ if systemctl is-active --quiet k3s 2>/dev/null || systemctl is-active --quiet k3
   echo "K3s is already running here - skipping installation. To reinstall, first run"
   echo "'sudo /usr/local/bin/k3s-uninstall.sh' or 'k3s-agent-uninstall.sh'."
 else
+  # The installer is downloaded to a file and checked against a pinned SHA-256 before it runs
+  # (never curl | sh). Rancher publishes no checksum for get.k3s.io, so the pin is the hash of
+  # the script at the time it was last reviewed; when it changes upstream, review the diff and
+  # refresh the pin:  curl -sfL https://get.k3s.io | sha256sum
+  K3S_INSTALLER_SHA256="e5cc3b3d9dfc1662c2d9be6da5abc9a4cd317d6abc3a5ffc02e3dd3248207fee"
+  K3S_INSTALLER="$(mktemp)"
+  curl -sfL https://get.k3s.io -o "$K3S_INSTALLER"
+  echo "$K3S_INSTALLER_SHA256  $K3S_INSTALLER" | sha256sum -c - >/dev/null || {
+    echo "ERROR: get.k3s.io does not match the pinned SHA-256 - upstream changed the installer." >&2
+    echo "Review it (cat $K3S_INSTALLER) and update K3S_INSTALLER_SHA256 in this script." >&2
+    exit 1
+  }
   if [[ "$ROLE" == "server" ]]; then
-    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --disable traefik --disable servicelb --write-kubeconfig-mode 644" sh -
+    INSTALL_K3S_EXEC="server --disable traefik --disable servicelb --write-kubeconfig-mode 644" sh "$K3S_INSTALLER"
   else
-    curl -sfL https://get.k3s.io | K3S_URL="$K3S_URL" K3S_TOKEN="$K3S_TOKEN" sh -
+    K3S_URL="$K3S_URL" K3S_TOKEN="$K3S_TOKEN" sh "$K3S_INSTALLER"
   fi
+  rm -f "$K3S_INSTALLER"
 fi
 
 echo "=== [5/5] Status ==="
