@@ -1,6 +1,7 @@
-# Points Flux at the homelab-infra repo itself (public GitHub repo). Reuses studylife-git-auth
-# (see sealed-secrets/flux-system/) - the same credential every other GitRepository on this
-# cluster reuses, not actually studylife-specific despite the name.
+# Points Flux at the homelab-infra repo itself (public GitHub repo). Read access only: since
+# 2026-09-12 no GitRepository on this cluster carries a token any more - the app repos write
+# their released image tags from CI (deploy-bump jobs over their semantic-release deploy keys)
+# and Flux only reads. The former studylife-git-auth secret (a personal access token) is gone.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
@@ -11,5 +12,3 @@ spec:
   url: https://github.com/lukislp/homelab-infra.git
   ref:
     branch: main
-  secretRef:
-    name: studylife-git-auth
