@@ -1,0 +1,93 @@
+name: Validate manifests
+
+# Every manifest in this repo is applied to the production cluster, either continuously by
+# Flux (flux/infra-deploy) or once by provisioning/bootstrap-cluster.ps1. Nothing here used to
+# be checked before merge; the 2026-09 Tempo hotfix (a duplicated map key that PyYAML and
+# kubectl tolerate but kustomize/Flux reject) is exactly the kind of mistake this catches.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Strict YAML: duplicate keys are a hard error here (they are for kustomize and Flux,
+      # but not for PyYAML or `kubectl apply`, which is how the Tempo hotfix slipped through).
+      - name: Reject duplicate keys and unparsable YAML
+        run: |
+          python3 - <<'EOF'
+          import pathlib, sys, yaml
+
+          class Strict(yaml.SafeLoader):
+              pass
+
+          def mapping(loader, node):
+              seen = set()
+              for key_node, _ in node.value:
+                  key = loader.construct_object(key_node, deep=True)
+                  if key in seen:
+                      raise yaml.constructor.ConstructorError(
+                          None, None, f"duplicate key {key!r}", key_node.start_mark)
+                  seen.add(key)
+              return loader.construct_mapping(node, deep=True)
+
+          Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+
+          failed = False
+          for path in sorted(pathlib.Path(".").rglob("*.y*ml")):
+              if path.parts[0] in (".git", ".github"):
+                  continue
+              try:
+                  list(yaml.load_all(path.read_text(encoding="utf-8"), Loader=Strict))
+              except Exception as exc:  # noqa: BLE001 - report every broken file, then fail once
+                  print(f"::error file={path}::{exc}")
+                  failed = True
+          sys.exit(1 if failed else 0)
+          EOF
+
+      # The only thing Flux reconciles from this repo must always render. The kustomization
+      # pulls files from ../../monitoring, which plain kustomize refuses by default; Flux's
+      # kustomize-controller builds with load restrictions off, so mirror that here.
+      - name: Render the Flux-managed kustomization
+        run: kubectl kustomize --load-restrictor LoadRestrictionsNone flux/infra-deploy > /tmp/infra-deploy.yaml && grep -c '^kind:' /tmp/infra-deploy.yaml
+
+      - name: Install kubeconform (checksum-pinned)
+        run: |
+          curl -fsSL -o kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+
+      # Schema validation of every Kubernetes manifest against the API + the CRDs in use
+      # (cert-manager, Gateway API, NGINX Gateway Fabric, Flux, MetalLB, sealed-secrets).
+      # Helm values files are not Kubernetes objects and are skipped by name; CRDs whose
+      # schema is not in the catalog are reported, not failed (-ignore-missing-schemas), so a
+      # new CRD kind never blocks a merge silently - it shows up in the summary instead.
+      - name: kubeconform
+        run: |
+          set -o pipefail
+          find cluster monitoring flux sealed-secrets -name '*.yaml' ! -name '*-values.yaml' ! -name 'kustomization.yaml' -print0 \
+            | xargs -0 kubeconform -strict -summary -output pretty \
+                -ignore-missing-schemas \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          kubeconform -strict -summary -ignore-missing-schemas \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /tmp/infra-deploy.yaml
