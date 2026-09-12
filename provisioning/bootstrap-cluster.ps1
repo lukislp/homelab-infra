@@ -13,10 +13,10 @@
   NOT included (deliberately):
     - Loki/Promtail (log aggregation) - Promtail demonstrably yields 0 targets on a fresh
       cluster, so it's skipped by default. Include it anyway with -WithLoki.
-    - Flux install - needs the studylife-git-auth/studylife-registry-auth secrets created
-      manually BEFOREHAND (real credentials, see README.md), which this script deliberately
-      never creates itself. Include it anyway with -WithFlux (only useful if both secrets
-      already exist).
+    - Flux install - needs the studylife-registry-auth secret created manually BEFOREHAND
+      (real credentials, see README.md), which this script deliberately never creates itself.
+      Include it anyway with -WithFlux (only useful if that secret already exists). The git
+      sources need no credential any more (public repos, read-only since 2026-09-12).
     - cert-manager itself (the controller/CRDs, as opposed to the ClusterIssuers in
       cluster/01-cert-manager-issuers.yaml) - install via its own upstream instructions first,
       this script only provisions the issuers that depend on it.
@@ -112,12 +112,11 @@ if ($WithFlux) {
     Write-Host ""
     Write-Host "=== [6/6] Flux (GitOps) ==="
     # Both secrets must be created by hand BEFOREHAND (real credentials, see README.md) - this
-    # script deliberately never creates them itself. Shared by every GitRepository on the
-    # cluster (studylife, studylife-ai, studylife-mcp, piwatch, unifiprotectdashboard,
-    # homelab-infra itself), not studylife-specific despite the name.
-    kubectl -n flux-system get secret studylife-git-auth, studylife-registry-auth 2>$null
+    # script deliberately never creates it itself. The GitRepositories themselves need no
+    # credential (public repos, read-only).
+    kubectl -n flux-system get secret studylife-registry-auth 2>$null
     if ($LASTEXITCODE -ne 0) {
-        throw "Secrets 'studylife-git-auth'/'studylife-registry-auth' are missing in namespace 'flux-system' - see README.md, Flux section."
+        throw "Secret 'studylife-registry-auth' is missing in namespace 'flux-system' - see README.md, Flux section."
     }
     kubectl apply -f (Join-Path $RepoDir "flux/00-install.yaml")
     Wait-Deployment -Namespace "flux-system" -Name "source-controller"
