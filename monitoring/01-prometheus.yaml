@@ -487,7 +487,22 @@ spec:
       serviceAccountName: prometheus
       containers:
         - name: prometheus
-          image: prom/prometheus:v2.55.1
+          # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
+          # readable tag: the tag alone still resolves through a mutable registry pointer, the
+          # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
+          # Deliberately still 2.x, and the version is unchanged by this pin: v2.55.1 is the
+          # LAST 2.x release (2.53.x is only the parallel LTS branch), so there is no
+          # same-major upgrade left to take. v2.55.1 also happens to be the exact version
+          # upstream requires you to be on before jumping to 3.x, and the only version 3.x
+          # can be rolled back to - so this is the right launch pad, not a dead end.
+          # The 3.x jump is left as its own change because its risks are query-shaped, not
+          # startup-shaped: le/quantile label values get normalised on ingestion (le="1"
+          # becomes le="1.0"), range selectors become left-open, and "." in a regex matcher
+          # starts matching newlines. None of that crashes a pod - it quietly changes what
+          # dashboards and alert rules return, which needs a human watching panels rather
+          # than a green readiness probe. See the PR that introduced this pin for the full
+          # audit of this file against the 3.0 migration guide.
+          image: prom/prometheus:v2.55.1@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3
           args:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
