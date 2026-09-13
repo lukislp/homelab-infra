@@ -69,12 +69,27 @@ Wait-Deployment -Namespace "cnpg-system" -Name "cnpg-controller-manager"
 # cluster that was the amplifier of the 2026-09-04 incident: under node load the probes timed out,
 # the kubelet restarted the operator mid-failover (29 restarts), and every restart re-initiated a
 # Postgres failover that never completed. Same values as the live hotfix applied that night.
-kubectl -n cnpg-system patch deploy cnpg-controller-manager --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/resources","value":{"requests":{"cpu":"200m","memory":"200Mi"},"limits":{"cpu":"500m","memory":"400Mi"}}},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/timeoutSeconds","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/failureThreshold","value":6},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/timeoutSeconds","value":5}]'
+# The startupProbe joined the patch on 2026-09-13 - it was the last one still left at the
+# 1-second default, and a startup timeout on a cold arm64 node is the same false alarm as a
+# liveness timeout under load (see cluster/00i-probe-timeout-budget.md).
+kubectl -n cnpg-system patch deploy cnpg-controller-manager --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/resources","value":{"requests":{"cpu":"200m","memory":"200Mi"},"limits":{"cpu":"500m","memory":"400Mi"}}},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/timeoutSeconds","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/failureThreshold","value":6},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/timeoutSeconds","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/startupProbe/timeoutSeconds","value":5}]'
 Wait-Deployment -Namespace "cnpg-system" -Name "cnpg-controller-manager"
 
 Write-Host ""
 Write-Host "=== [3/6] Installing MetalLB ==="
 kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-native.yaml
+Wait-Deployment -Namespace "metallb-system" -Name "controller"
+# Same class of fix as the CNPG patch above, for the same reason (see
+# cluster/00i-probe-timeout-budget.md): the upstream manifest leaves every probe at the
+# Kubernetes default timeoutSeconds: 1, and on this hardware the controller had 31 restarts and
+# the speakers 5-15, all from "context deadline exceeded" on /metrics - never from an actual
+# fault. The resource patches from cluster/00e-metallb-hardening.md stay a manual step (that
+# doc is the source of truth for them); only the probe budget is automated here, because it is
+# the one that causes restarts. Runs with --type=json so it fails loudly if upstream ever
+# renames the probe fields.
+$metallbProbePatch = '[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/timeoutSeconds","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/failureThreshold","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/timeoutSeconds","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/failureThreshold","value":3}]'
+kubectl -n metallb-system patch deployment controller --type=json -p $metallbProbePatch
+kubectl -n metallb-system patch daemonset speaker --type=json -p $metallbProbePatch
 Wait-Deployment -Namespace "metallb-system" -Name "controller"
 
 Write-Host ""

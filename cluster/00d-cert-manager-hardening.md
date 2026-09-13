@@ -39,9 +39,19 @@ kubectl -n cert-manager patch deployment cert-manager-webhook --type=strategic -
   "spec": {"template": {"spec": {"containers": [{
     "name": "cert-manager-webhook",
     "resources": {"requests": {"cpu": "10m", "memory": "32Mi"},
-                  "limits": {"cpu": "200m", "memory": "128Mi"}}
+                  "limits": {"cpu": "200m", "memory": "128Mi"}},
+    "livenessProbe":  {"timeoutSeconds": 5, "failureThreshold": 5},
+    "readinessProbe": {"timeoutSeconds": 5, "failureThreshold": 3}
   }]}}}}'
 ```
+
+The webhook's probe timeouts were added 2026-09-13. The controller and cainjector patches above
+always carried a generous `timeoutSeconds: 15`, but the webhook kept the probes the upstream
+manifest ships, i.e. the Kubernetes default `timeoutSeconds: 1` - which on this hardware is a
+restart trigger rather than a health signal, see `00i-probe-timeout-budget.md`. A restarting
+webhook is the worst of the three to lose: while it is down the apiserver rejects every
+Certificate/Issuer write. The patch is a strategic merge, so it only sets the two fields and
+leaves `httpGet` path/port and `initialDelaySeconds` exactly as upstream has them.
 
 The NetworkPolicies for the namespace live in `06-network-policies-cert-manager.yaml`
 (a normal manifest, applied with the rest of `cluster/`) - the webhook port must stay open to
