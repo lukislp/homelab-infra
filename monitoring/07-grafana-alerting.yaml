@@ -232,6 +232,11 @@ data:
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [60] } }] }
             labels: { severity: warning }
             annotations: { summary: "Mindestens eine CNPG-Replica haengt mehr als 60 Sekunden hinter dem Primary - bei einem Failover droht in dem Umfang Datenverlust." }
+          # `or vector(86400)`: the archiver metric is exported by the PRIMARY only, so during a
+          # switchover the series moves from one instance to the next and the query is briefly
+          # empty. Without a fallback Grafana turns that gap into a NoData notification - i.e. a
+          # false alarm at exactly the moment a real database event happens (seen 2026-09-13
+          # during the 16.4 -> 16.15 upgrade). A large fallback reads as "no recent failure".
           - uid: alert-cnpg-wal-archive-failed
             title: "Postgres WAL-Archivierung schlaegt gerade fehl"
             condition: C
@@ -240,7 +245,7 @@ data:
               - refId: A
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: prometheus
-                model: { refId: A, expr: 'min(cnpg_pg_stat_archiver_seconds_since_last_failure)' }
+                model: { refId: A, expr: 'min(cnpg_pg_stat_archiver_seconds_since_last_failure) or vector(86400)' }
               - refId: B
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: "__expr__"
