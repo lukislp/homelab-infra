@@ -32,7 +32,16 @@ spec:
       hostPID: true
       containers:
         - name: node-exporter
-          image: prom/node-exporter:v1.8.2
+          # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
+          # readable tag: the tag alone still resolves through a mutable registry pointer, the
+          # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
+          # v1.8.2 -> v1.12.1: minor bumps within the same major, no metric this cluster uses
+          # was renamed or removed. The one thing worth knowing is the meminfo collector
+          # rewrite in v1.9.0, which maps a fixed struct instead of parsing whatever
+          # /proc/meminfo happens to contain - a handful of exotic node_memory_* series
+          # (FileHugePages, FilePmdMapped, Hugetlb) disappeared upstream. None of them are
+          # referenced by any dashboard or alert rule here, checked before the bump.
+          image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
           args:
             - --path.rootfs=/host
           ports:
