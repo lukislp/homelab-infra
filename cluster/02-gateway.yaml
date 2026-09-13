@@ -401,3 +401,33 @@ spec:
           from: Selector
           selector:
             matchLabels: { kubernetes.io/metadata.name: studylife-developers }
+    # github-dashboard (separate repo/namespace, github.com/lukislp/github-dashboard) - same
+    # -heim/-public pair as every other service on this Gateway. Backend speaks plain HTTP on
+    # 8000 (uvicorn --proxy-headers), no BackendTLSPolicy needed. Only the -public hostname
+    # completes a GitHub OAuth login (the OAuth App's redirect URI is registered for it).
+    - name: github-dashboard-heim
+      hostname: github-dashboard.heim.lan
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: github-dashboard-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: github-dashboard }
+    - name: github-dashboard-public
+      hostname: github-dashboard.lukas2311-homelab.com
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: github-dashboard-tls }
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: { kubernetes.io/metadata.name: github-dashboard }
