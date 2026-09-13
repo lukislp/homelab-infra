@@ -75,7 +75,9 @@ spec:
         # start (idempotent, a single SQLite db) so the non-root app below
         # can keep writing it - same migration pattern as autodoc-server.
         - name: fix-data-ownership
-          image: busybox:1.36.1
+          # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
+          # readable tag; 1.36.1 -> 1.38.0 is a minor bump within the same major.
+          image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
           command: ["chown", "-R", "1000:1000", "/app/data"]
           securityContext:
             runAsUser: 0
@@ -84,7 +86,18 @@ spec:
               mountPath: /app/data
       containers:
         - name: uptime-kuma
-          image: louislam/uptime-kuma:2
+          # Was the floating tag ":2", i.e. whatever the 2.x line happened to point at when a
+          # node last pulled - three nodes could legitimately have been running three
+          # different versions, and an upstream release could land here unannounced on any
+          # pod reschedule. Now a concrete version pinned by the multi-arch index digest
+          # (arm64 entry verified). The live pod was serving 2.5.3, so this is one patch
+          # release forward, not a jump.
+          # Direction matters for this one: uptime-kuma's SQLite migrations are forward-only
+          # (rollbackLatestPatch() is an empty stub upstream), so a downgrade boots old code
+          # against a newer schema. 2.5.0 changed analytics_type from an enum to a string,
+          # which makes anything below 2.5.x a genuinely unsafe target. Restore the Velero
+          # snapshot of /app/data rather than pinning backwards.
+          image: louislam/uptime-kuma:2.5.4@sha256:917318f9d7be5257f43ba412c766a473be336eb451d70744f3b482d0c3997c0e
           env:
             - { name: UPTIME_KUMA_SSL_KEY, value: /etc/uptime-kuma-backend-tls/tls.key }
             - { name: UPTIME_KUMA_SSL_CERT, value: /etc/uptime-kuma-backend-tls/tls.crt }
