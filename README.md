@@ -27,8 +27,12 @@ Prometheus, and Flux's reconciler RBAC.
   of which repo it's defined in. **Each app's own `GitRepository`/`ImageRepository`/
   `ImagePolicy`/`ImageUpdateAutomation`/`Kustomization` objects stay in that app's own repo** —
   they already point at that app's own GitHub repo, this repo doesn't become a new root of trust.
-- **`sealed-secrets/flux-system/`** — the shared git/registry credentials used by every
-  GitRepository object above, historically named after studylife but reused by all of them.
+- **`sealed-secrets/`** — cluster-owned credentials, encrypted for this cluster's
+  sealed-secrets controller and therefore safe to keep in a public repo. One subfolder per
+  namespace: `flux-system/` holds the shared git/registry credentials used by every
+  GitRepository object above (historically named after studylife but reused by all of them),
+  `velero/` the offsite-backup credentials. Applied by hand, one file at a time — Flux does
+  not reconcile this folder.
 - **`provisioning/`** — `setup-node.sh` (flash + provision a Pi node) and
   `bootstrap-cluster.ps1` (cluster-wide infra install: CNPG operator, MetalLB, ingress
   controller, applies everything in `cluster/` and `monitoring/`). Each app then runs its own
