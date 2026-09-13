@@ -117,7 +117,21 @@ spec:
         fsGroup: 10001
       containers:
         - name: tempo
-          image: grafana/tempo:2.10.8
+          # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
+          # readable tag: the tag alone still resolves through a mutable registry pointer, the
+          # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
+          # Deliberately still 2.x, and the version is unchanged by this pin: 2.10.8 is the
+          # newest 2.x release and the 2.10 line is still actively patched, so nothing is
+          # being left to rot here.
+          # Tempo 3.0 is a separate decision and a large one. It replaces ingesters and the
+          # compactor with block-builders, live-stores and a backend scheduler/worker, and
+          # Tempo hard-fails on unknown config keys - so the "ingester:" and "compactor:"
+          # blocks above both have to GO, not just be renamed. Those blocks are not
+          # decoration: they exist because this pod OOM-looped on a Pi node (2026-09-04) and
+          # the small-block settings are what keep block completion inside the 768Mi limit.
+          # There is also no supported downgrade from 3.0 back to 2.x. See the PR that
+          # introduced this pin for the full list.
+          image: grafana/tempo:2.10.8@sha256:f0561deb1c68ec44d6e6e7e4487f30106c4e5e768642077695b37958b105812a
           args: ["-config.file=/etc/tempo/tempo.yaml"]
           ports:
             - { name: otlp-grpc, containerPort: 4317 }
