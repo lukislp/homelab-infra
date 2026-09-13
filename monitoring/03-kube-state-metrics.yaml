@@ -63,7 +63,18 @@ spec:
       serviceAccountName: kube-state-metrics
       containers:
         - name: kube-state-metrics
-          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0
+          # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
+          # readable tag: the tag alone still resolves through a mutable registry pointer, the
+          # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
+          # v2.18.0 -> v2.20.0: two minor bumps, same major. v2.20.0 adds four
+          # admissionregistration.k8s.io resources (mutating/validating admission policies and
+          # their bindings) to its DEFAULT resource list, which would have meant a wall of
+          # "forbidden" errors against the restricted ClusterRole above - the explicit
+          # --resources list below already makes that a non-event, same as it did for v2.18.0.
+          # The other v2.20.0 change to watch for, kube_pod_status_reason becoming sparse
+          # (no more value-0 series for reasons that are not set), affects nothing here: that
+          # metric is not referenced by any dashboard or alert rule in this repo.
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0@sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b
           # v2.18.0 defaults to watching many more resource types than v2.13.0 did (CSRs,
           # Leases, ResourceQuotas, admission webhooks, CronJobs, HPAs, NetworkPolicies,
           # StorageClasses, ...), none of which this cluster's RBAC above grants - found live
