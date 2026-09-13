@@ -1,12 +1,14 @@
-# IMPORTANT, incident found live: NEVER apply this file directly to prod via "kubectl apply -f
-# k8s/17-grafana.yaml", not even for a seemingly isolated change (e.g. automountServiceAccountToken) -
-# it contains placeholder hostnames ("grafana.example.invalid"/"grafana-public.example.invalid"),
-# which are ONLY replaced by bootstrap-cluster.ps1's -GrafanaHost/-GrafanaPublicHost parameters at
-# apply time. A direct apply overwrites the real hostnames in the ingress AND (via cert-manager
-# ingress-shim) in the certificate - this made Grafana unreachable for everyone, until the error
-# was fixed live via "kubectl patch ingress" + certificate reissue. For targeted changes:
-# "kubectl patch" against the individual resource, exactly like the Cache__ConnectionString
-# incident at k8s/01-config-and-secret.yaml (see the "Client TLS" section above).
+# HISTORICAL, no longer applicable (corrected 2026-09-13): this file used to carry placeholder
+# hostnames ("grafana.example.invalid"/"grafana-public.example.invalid") in an Ingress that only
+# bootstrap-cluster.ps1's -GrafanaHost/-GrafanaPublicHost parameters substituted at apply time, so
+# a direct "kubectl apply -f" overwrote the real hostnames in the Ingress AND - via cert-manager's
+# ingress-shim - in the certificate, which made Grafana unreachable for everyone until it was
+# patched back live. That hazard is gone: routing moved to the Gateway API and the Grafana
+# hostnames now live in cluster/02-gateway.yaml as an HTTPRoute. This file no longer contains an
+# Ingress, no "example.invalid" string, and no placeholder of any kind - bootstrap-cluster.ps1
+# still documents -GrafanaHost as a parameter but no longer substitutes anything into it.
+# A plain "kubectl apply -f monitoring/04-grafana.yaml" is safe again. Run "kubectl diff -f"
+# first anyway, the way every manual apply in this repo should.
 #
 # Self-hosted Grafana instead of Grafana Cloud (no external account needed). Provisioning via
 # ConfigMap (Grafana automatically reads /etc/grafana/provisioning/{datasources,dashboards} on
@@ -149,7 +151,19 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: grafana
-          image: grafana/grafana:11.3.1
+          # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
+          # readable tag: the tag alone still resolves through a mutable registry pointer, the
+          # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
+          # 11.3.1 -> 11.6.16, the last release of the 11.x line: minor bumps within the same
+          # major, no database schema rewrite, and the provisioning file formats are
+          # untouched. This is explicitly a stopgap, not a destination - the whole 11 line
+          # reached end of support on 2026-06-25 and receives no further security patches.
+          # Grafana 12 and 13 are the real work and are deliberately NOT taken here: both
+          # hops run an irreversible migration on this PVC (11->12 a full rewrite of the
+          # annotation table, 12->13 a move of folders/dashboards into unified storage) and
+          # upstream supports no downgrade from either - the only rollback is restoring a
+          # copy of grafana.db. That needs its own change with its own backup step.
+          image: grafana/grafana:11.6.16@sha256:d67af92050b8d93b393dc741864752a69c9da1ffa39c1bb9af49ad5d9e47d2c3
           env:
             # GF_SERVER_* is Grafana's standard way to set any grafana.ini setting via an env
             # var (GF_<SECTION>_<KEY>) - no separate grafana.ini ConfigMap mount needed.
