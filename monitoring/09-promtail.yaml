@@ -77,6 +77,21 @@ spec:
       # "promtail" (a dedicated ServiceAccount/ClusterRole/ClusterRoleBinding, now removed)
       # back when kubernetes_sd_configs required list/watch on pods/nodes.
       automountServiceAccountToken: false
+      tolerations:
+        # This DaemonSet must run on EVERY node including the control-plane Pi - a node
+        # whose logs nothing ships is a blind spot, not a saved resource.
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+        # pinode01 additionally carries studylife/relief:NoSchedule (keeps app workloads off
+        # the control-plane node after the 2026-09 Longhorn rebalance). A NoSchedule taint
+        # does not evict, so the pod that was already running there survived it unnoticed -
+        # until the first rollout of this DaemonSet, which silently dropped pinode01 from 3
+        # nodes to 2. Same toleration piwatch's node-agent already carries, for the same
+        # reason: a monitoring agent is not an app workload.
+        - key: studylife/relief
+          operator: Exists
       containers:
         - name: promtail
           image: grafana/promtail:3.2.1

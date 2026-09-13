@@ -49,6 +49,27 @@ kubectl -n metallb-system patch deployment controller --type=json -p "$METALLB_P
 kubectl -n metallb-system patch daemonset  speaker    --type=json -p "$METALLB_PROBES"
 ```
 
+## Speaker tolerations
+
+The speaker must announce from **every** node, `pinode01` included. The upstream manifest
+tolerates the control-plane taint but not `studylife/relief:NoSchedule`, which `pinode01` also
+carries. `NoSchedule` does not evict, so the speaker already running there survived the taint
+being added - and would silently vanish on the *first* rollout of the DaemonSet. That is
+exactly how node-exporter and promtail lost `pinode01` on 2026-09-13. Also automated in
+`bootstrap-cluster.ps1`:
+
+```bash
+kubectl -n metallb-system patch daemonset speaker --type=strategic -p '{
+  "spec": {"template": {"spec": {"tolerations": [
+    {"key": "node-role.kubernetes.io/master",        "operator": "Exists", "effect": "NoSchedule"},
+    {"key": "node-role.kubernetes.io/control-plane", "operator": "Exists", "effect": "NoSchedule"},
+    {"key": "studylife/relief",                      "operator": "Exists", "effect": "NoSchedule"}
+  ]}}}}'
+```
+
+`tolerations` has no strategic-merge key, so the patch replaces the whole list - idempotent,
+and it keeps the two upstream entries because they are spelled out above.
+
 `--type=json` on purpose: if a future MetalLB version renames or drops those probe fields the
 patch fails loudly instead of silently adding a probe that does nothing.
 
