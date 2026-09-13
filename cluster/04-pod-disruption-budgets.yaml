@@ -18,22 +18,36 @@ spec:
   selector:
     matchLabels: { app.kubernetes.io/name: studylife-gateway-nginx }
 ---
-# Three more singletons found live without a PDB (2026-08-15 audit): each is a 1-replica
-# Deployment where a voluntary eviction during a node drain has a real, distinct consequence -
-# minAvailable: 1 on a 1-replica Deployment fully blocks voluntary eviction (Kubernetes waits
-# for a replacement to be ready elsewhere first, or the drain itself blocks/warns), it does NOT
-# prevent an actual forced node shutdown.
+# Two more singletons found live without a PDB (2026-08-15 audit): each is a 1-replica
+# Deployment where a voluntary eviction during a node drain has a real, distinct consequence.
 #
-# CoreDNS: cluster-wide DNS. Without this, every in-cluster service-name lookup (Redis,
-# Postgres pooler, inter-pod calls) fails cluster-wide for however long the single pod takes to
-# reschedule - not specific to this app, affects everything.
+# CORRECTION (2026-09-13 drain-readiness audit): both were originally written as
+# "minAvailable: 1 # of 1", and that turned out to be the wrong tool for a singleton. On a
+# 1-replica Deployment minAvailable: 1 doesn't slow an eviction down, it makes it impossible -
+# "kubectl get pdb -A" showed both at disruptionsAllowed: 0 permanently, so "kubectl drain" of
+# whichever node held them never completed and needed the PDB deleted by hand first. Neither
+# workload can be scaled to 2 from this repo (see the per-PDB comments below), so both moved to
+# maxUnavailable: 1: a drain proceeds and the pod is rescheduled, and the PDB still does its
+# real job the moment either Deployment ever runs more than one replica.
+#
+# CoreDNS: cluster-wide DNS. A voluntary eviction means every in-cluster service-name lookup
+# (Redis, Postgres pooler, inter-pod calls) fails for however long the single pod takes to
+# reschedule - not specific to any one app, affects everything.
+# Why not simply 2 replicas: the CoreDNS Deployment is a k3s *packaged addon*
+# (objectset.rio.cattle.io/owner-gvk: k3s.cattle.io/v1, Kind=Addon, source
+# /var/lib/rancher/k3s/server/manifests/coredns.yaml) - not a HelmChart, so there is no
+# HelmChartConfig to override, and a plain "kubectl scale" is reverted the next time k3s
+# re-applies that addon (i.e. on the next k3s upgrade - exactly when you want to drain).
+# Raising it durably needs a file on the server node, outside this repo's GitOps scope; see
+# cluster/00h-pod-security-and-drain-readiness.md for the optional pre-drain workaround.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: coredns
   namespace: kube-system
 spec:
-  minAvailable: 1 # of 1
+  # NOT minAvailable: 1 - see the CORRECTION note above (1 replica, k3s addon).
+  maxUnavailable: 1
   selector:
     matchLabels: { k8s-app: kube-dns }
 ---
@@ -43,12 +57,19 @@ spec:
 # known-good config), but any Gateway/HTTPRoute change made during that window silently doesn't
 # take effect until the pod reschedules - a "why isn't my change applying" trap, just without
 # any live-traffic consequence.
+# Why not simply 2 replicas: NGF's control plane does support them (it runs leader election,
+# lease "nginx-gateway-leader-election" in that namespace), but the Deployment itself isn't
+# versioned anywhere in this repo - it comes from the upstream static manifest applied by hand
+# per cluster/00c-nginx-gateway-fabric.md. Scaling it would mean a third undocumented live patch
+# on a resource a re-bootstrap silently resets, to buy a hot standby for a component whose
+# outage has no live-traffic consequence at all. maxUnavailable: 1 is the honest trade here.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: nginx-gateway
   namespace: nginx-gateway
 spec:
-  minAvailable: 1 # of 1
+  # NOT minAvailable: 1 - see the CORRECTION note above (1 replica, upstream-managed Deployment).
+  maxUnavailable: 1
   selector:
     matchLabels: { app.kubernetes.io/name: nginx-gateway }
