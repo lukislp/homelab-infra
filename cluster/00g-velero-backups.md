@@ -47,7 +47,7 @@ kubectl -n studylife-scale annotate cluster studylife-pg cnpg.io/reloadedAt="$(d
 
 ## What gets backed up (opt-in only)
 
-Volumes join the nightly 03:00 run (TTL 168h) via pod annotation
+Volumes join the nightly 03:00 run (TTL 72h) via pod annotation
 `backup.velero.io/backup-volumes: <volume>` in each app's own repo:
 
 | App (namespace) | Volume | Consistency |
@@ -60,6 +60,11 @@ Volumes join the nightly 03:00 run (TTL 168h) via pod annotation
 | studylife-ai | data | agent checkpoints; crash-consistent, accepted |
 | studylife-mcp | data | oauth.db (MCP client registrations/tokens) |
 | unifiprotectdashboard | data | dashboard.db + enc.key + vapid-keys.json (irreplaceable) |
+| claude-queue-pg (claude-queue) | pgdata | crash-consistent; queue state, rebuildable |
+| studylife-alexa | data | per-user encrypted StudyLife API keys (account links) |
+| studylife-developers | data | KeyStore - every registered OAuth client (irreplaceable) |
+| studylife-webhooks | data | webhook registrations (target_url/events/secret) |
+| github-dashboard | data | sessions + per-user preferences (SQLite, WAL mode) |
 
 A second schedule, `velero-cluster-state` (03:30, resources only, no volumes), preserves
 the hand-curated Kubernetes state nothing else holds: the sealed-secrets private keys
@@ -83,10 +88,18 @@ nightly-pvc schedule's includedNamespaces list - the first rollout of studylife-
 unifiprotectdashboard shipped annotations without the namespaces, and nothing happened,
 silently. When a new app opts in, extend the schedule list in the same change.
 
+Coverage was completed 2026-09-13: studylife-alexa, studylife-developers,
+studylife-webhooks and github-dashboard were the last namespaces holding a PVC but
+appearing in neither schedule. Three already carried the opt-in annotation and had been
+backing up nothing at all - exactly the failure mode above; studylife-developers got its
+annotation in the same round. Every namespace with a PVC is now in one of the two lists.
+
 ## Restore
 
 ```bash
-kubectl -n velero get backup                        # pick one
+# NOTE: "get backup" is ambiguous in this cluster - Longhorn ships a Backup CRD too and
+# wins the short name. Always spell Velero's out, or kubectl silently queries the wrong API.
+kubectl -n velero get backups.velero.io              # pick one
 velero restore create --from-backup <name> \
   --include-namespaces monitoring --selector app=uptime-kuma \
   --namespace-mappings monitoring:restore-test     # drill: restore beside prod, not over it
