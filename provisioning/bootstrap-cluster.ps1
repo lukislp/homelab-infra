@@ -90,6 +90,13 @@ Wait-Deployment -Namespace "metallb-system" -Name "controller"
 $metallbProbePatch = '[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/timeoutSeconds","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/failureThreshold","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/timeoutSeconds","value":5},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/failureThreshold","value":3}]'
 kubectl -n metallb-system patch deployment controller --type=json -p $metallbProbePatch
 kubectl -n metallb-system patch daemonset speaker --type=json -p $metallbProbePatch
+# The speaker must announce from EVERY node, pinode01 included, and pinode01 carries
+# studylife/relief:NoSchedule on top of the control-plane taint the upstream manifest already
+# tolerates. NoSchedule does not evict, so the speaker that was running there survived the
+# taint being added - and would then silently disappear on the FIRST rollout of this DaemonSet
+# (exactly what happened to node-exporter/promtail on 2026-09-13). A strategic-merge patch
+# replaces the toleration list wholesale, so this stays idempotent.
+kubectl -n metallb-system patch daemonset speaker --type=strategic -p '{"spec":{"template":{"spec":{"tolerations":[{"key":"node-role.kubernetes.io/master","operator":"Exists","effect":"NoSchedule"},{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"},{"key":"studylife/relief","operator":"Exists","effect":"NoSchedule"}]}}}}'
 Wait-Deployment -Namespace "metallb-system" -Name "controller"
 
 Write-Host ""

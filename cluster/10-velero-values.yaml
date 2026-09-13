@@ -70,6 +70,24 @@ configuration:
 snapshotsEnabled: false
 deployNodeAgent: true
 nodeAgent:
+  # The node-agent is a DaemonSet and must run on EVERY node - it is the thing that actually
+  # reads the PVC files, so a node without one contributes nothing to the nightly backup.
+  # pinode01 carries studylife/relief:NoSchedule (keeps app workloads off the control-plane
+  # node after the 2026-09 Longhorn rebalance) and the chart ships no tolerations at all. A
+  # NoSchedule taint does not evict, so the pod already running there survived the taint being
+  # added and nothing looked wrong - but the next helm upgrade would have silently dropped
+  # pinode01 from the backup. That exact failure hit node-exporter/promtail on 2026-09-13,
+  # which is how this was found. A backup agent is not an app workload.
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+    - key: studylife/relief
+      operator: Exists
+      effect: NoSchedule
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }

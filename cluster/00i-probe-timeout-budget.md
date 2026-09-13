@@ -65,6 +65,38 @@ kubectl -n kube-system patch deployment sealed-secrets-controller --type=strateg
 kubectl -n kube-system rollout status deployment/sealed-secrets-controller
 ```
 
+## Before rolling any DaemonSet on this cluster: check its tolerations
+
+`pinode01` carries **two** taints: the usual control-plane one and
+`studylife/relief=true:NoSchedule` (keeps app workloads off the control-plane node after the
+2026-09 Longhorn rebalance). `NoSchedule` does not evict, so a DaemonSet pod that was already
+running on `pinode01` when the taint was added keeps running there and everything looks
+healthy - until the **first rollout** of that DaemonSet, at which point the pod is deleted and
+cannot come back. The DaemonSet quietly goes from 3 nodes to 2.
+
+This is exactly what the probe rollout did to `node-exporter` and `promtail` on 2026-09-13
+(fixed in the same pass by giving both the toleration `piwatch`'s node-agent already had).
+Checked and fixed at the same time: `metallb-system/speaker` and `velero/node-agent`, both of
+which were sitting on the same landmine.
+
+```bash
+# Which DaemonSets would lose pinode01 on their next rollout?
+kubectl get ds -A -o json | jq -r '
+  .items[] | select([.spec.template.spec.tolerations[]?.key]
+    | index("studylife/relief") | not)
+  | "\(.metadata.namespace)/\(.metadata.name)"'
+```
+
+As of 2026-09-13 that leaves only Longhorn's three DaemonSets (`longhorn-manager`,
+`longhorn-csi-plugin`, `engine-image-*`), which ship with **no** tolerations at all and are
+therefore on the same landmine: today they run on `pinode01` only because they were scheduled
+before the taint existed. The chart route is `defaultSettings.taintToleration` in
+`11-longhorn-values.yaml` (Longhorn propagates it to its own components), but applying it
+means a `helm upgrade` of the live storage layer with volumes attached, which is a change that
+wants its own maintenance window and its own verification - deliberately **not** bundled into
+a probe fix. Until then: do not roll a Longhorn DaemonSet without setting that first, or
+`pinode01` silently stops being a replica target.
+
 ## Not fixable from git
 
 ### coredns / metrics-server / local-path-provisioner (k3s packaged addons)
