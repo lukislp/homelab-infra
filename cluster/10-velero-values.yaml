@@ -113,6 +113,15 @@ schedules:
         - studylife-mcp
         - unifiprotectdashboard
         - claude-queue
+        # Added 2026-09-13 - these four were the cluster's last uncovered namespaces. Each
+        # runs a single Deployment with exactly one Longhorn PVC holding data nothing else
+        # can reconstruct: the Alexa account links, the marketplace's OAuth client KeyStore,
+        # the webhook registrations, and the dashboard's session/settings store. Tens of MB
+        # in total.
+        - studylife-alexa
+        - studylife-developers
+        - studylife-webhooks
+        - github-dashboard
       snapshotVolumes: false
       # Volumes join the backup by OPT-IN pod annotation only
       # (backup.velero.io/backup-volumes: <volume-name>, set in each app's own repo) -
