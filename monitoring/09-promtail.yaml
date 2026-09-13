@@ -94,7 +94,20 @@ spec:
           operator: Exists
       containers:
         - name: promtail
-          image: grafana/promtail:3.2.1
+          # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
+          # readable tag: the tag alone still resolves through a mutable registry pointer, the
+          # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
+          # 3.6.11 is the LAST promtail release that exists - promtail reached end of life on
+          # 2026-03-02 and was removed from the Loki repo with Loki 3.7.3, so the server next
+          # door (08-loki.yaml) goes on to 3.7.x while this agent stops here. The push API it
+          # speaks is unchanged, so 3.6.11 still ships into a 3.7.7 Loki, but it will never
+          # receive another fix of any kind, security included.
+          # Deliberately a concrete version and not :3.6 or :latest - both of those tags are
+          # OLDER than 3.6.11 upstream and were never moved again after promtail was frozen.
+          # The replacement is Grafana Alloy, which can read this promtail.yaml as-is or
+          # convert it with "alloy convert --source-format=promtail". That is a real migration
+          # with its own rollout, deliberately not bundled into an image bump.
+          image: grafana/promtail:3.6.11@sha256:a761cb834cfaeee29745440d4884d6748f0a08d8f68928db1d707018c1dcfbe9
           args: ["-config.file=/etc/promtail/promtail.yaml"]
           resources:
             requests: { cpu: 25m, memory: 64Mi }
