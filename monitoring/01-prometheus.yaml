@@ -532,10 +532,23 @@ spec:
             httpGet: { path: /-/healthy, port: 9090 }
             initialDelaySeconds: 15
             periodSeconds: 15
+            # timeoutSeconds/failureThreshold raised deliberately (2026-09-13): with the
+            # Kubernetes default timeoutSeconds: 1 these probes were the single biggest
+            # restart trigger in this cluster. pinode03 is a 4 GB arm64 node that runs with
+            # well under 1 GB available and swap in use; during a load spike an HTTP probe
+            # routinely needs longer than one second to answer, kubelet counts that as a
+            # failure and kills a perfectly healthy container. At 1 s the probe measures node
+            # load, not process health - 5 s plus a wider failure window restores it as a
+            # health signal. Probe path/port/type are deliberately unchanged.
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet: { path: /-/ready, port: 9090 }
             initialDelaySeconds: 10
             periodSeconds: 5
+            # Same reasoning as the liveness probe above.
+            timeoutSeconds: 5
+            failureThreshold: 3
       volumes:
         - name: config
           configMap: { name: prometheus-config }

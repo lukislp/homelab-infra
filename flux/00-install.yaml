@@ -2614,6 +2614,17 @@ spec:
           httpGet:
             path: /healthz
             port: healthz
+          # timeoutSeconds/failureThreshold raised deliberately (2026-09-13), like the
+          # resource limits below: these are LOCAL modifications to the generated manifest
+          # and a future `flux install`/`flux bootstrap` regeneration must re-apply them.
+          # Upstream ships these probes without timeoutSeconds, i.e. at the Kubernetes
+          # default of 1 s. pinode03 is a 4 GB arm64 node running with well under 1 GB
+          # available and swap in use; under a load spike /healthz needs longer than one
+          # second to answer, kubelet counts that as a probe failure and kills a healthy
+          # controller - the four Flux controllers together had 20-30 restarts each. At 1 s
+          # the probe measures node load, not process health. Path/port/type unchanged.
+          timeoutSeconds: 5
+          failureThreshold: 5
         name: manager
         ports:
         - containerPort: 9090
@@ -2629,6 +2640,9 @@ spec:
           httpGet:
             path: /
             port: http
+          # Same reasoning as the first probe in this file.
+          timeoutSeconds: 5
+          failureThreshold: 3
         # Default limit (1000m/1Gi) too generous for the 4GB node - reduced to the
         # ~2-3x request pattern established here (see k8s/04-web.yaml etc).
         resources:
@@ -3542,6 +3556,9 @@ spec:
           httpGet:
             path: /healthz
             port: healthz
+          # Same reasoning as the first probe in this file.
+          timeoutSeconds: 5
+          failureThreshold: 5
         name: manager
         ports:
         - containerPort: 8080
@@ -3554,6 +3571,9 @@ spec:
           httpGet:
             path: /readyz
             port: healthz
+          # Same reasoning as the first probe in this file.
+          timeoutSeconds: 5
+          failureThreshold: 3
         # Default limit (1000m/1Gi) too generous for the 4GB node - reduced to the
         # ~2-3x request pattern established here (see k8s/04-web.yaml etc).
         resources:
@@ -4282,6 +4302,9 @@ spec:
           httpGet:
             path: /healthz
             port: healthz
+          # Same reasoning as the first probe in this file.
+          timeoutSeconds: 5
+          failureThreshold: 5
         name: manager
         ports:
         - containerPort: 8080
@@ -4294,6 +4317,9 @@ spec:
           httpGet:
             path: /readyz
             port: healthz
+          # Same reasoning as the first probe in this file.
+          timeoutSeconds: 5
+          failureThreshold: 3
         # Default limit (1000m/1Gi) too generous for the 4GB node - reduced to the
         # ~2-3x request pattern established here (see k8s/04-web.yaml etc).
         resources:
@@ -4843,6 +4869,9 @@ spec:
           httpGet:
             path: /healthz
             port: healthz
+          # Same reasoning as the first probe in this file.
+          timeoutSeconds: 5
+          failureThreshold: 5
         name: manager
         ports:
         - containerPort: 8080
@@ -4855,6 +4884,9 @@ spec:
           httpGet:
             path: /readyz
             port: healthz
+          # Same reasoning as the first probe in this file.
+          timeoutSeconds: 5
+          failureThreshold: 3
         # Default limit (1000m/1Gi) too generous for the 4GB node - reduced to the
         # ~2-3x request pattern established here (see k8s/04-web.yaml etc).
         resources:
