@@ -47,6 +47,16 @@ defaultSettings:
   # utilization target, and Longhorn moves replicas gradually (rebuild-then-remove-old, not
   # all at once), so this is safe to enable on already-attached volumes.
   replicaAutoBalance: best-effort
+  #
+  # WARNING found on 2026-09-14, unresolved: pinode03's Longhorn disk is /var/lib/longhorn on its
+  # 57GB ROOT filesystem, which on that node is the SD card (mmcblk0) - pinode01 and pinode02 both
+  # offer 229GB. That card is already the cluster's worst bottleneck: under memory pressure it was
+  # measured at 94% busy serving 15.6MB/s of page-cache refills, which stalled every health probe
+  # on the node. Auto-balance has not actually moved anything in the 20 days since pinode03 joined
+  # (storageScheduled there is still 0), but if it ever does, replica write traffic lands on that
+  # same card. Either give pinode03 a disk on its USB storage, or set allowScheduling=false on its
+  # Longhorn disk, before relying on this setting to spread replicas.
+
   # storageMinimalAvailablePercentage default is high (25%) and assumes real server disks;
   # pinode03 (57GB ephemeral storage) is far smaller than pinode01/02 (229GB) but actual
   # data volume across the whole cluster is currently ~5GB total (verified live: prometheus
@@ -60,3 +70,20 @@ defaultSettings:
   # real volumes attach - pinode01/pinode03 are 4GB nodes already running near 50-70% memory
   # before Longhorn.
   guaranteedInstanceManagerCPU: ~
+  # pinode01 carries studylife/relief=true:NoSchedule on top of the control-plane taint, and
+  # Longhorn's own DaemonSets (longhorn-manager, longhorn-csi-plugin, engine-image-*) ship with
+  # no tolerations at all. NoSchedule does not evict, so on 2026-09-14 all three were still
+  # running on pinode01 purely because they predate the taint, while the DaemonSets themselves
+  # reported desiredNumberScheduled=2. The first rollout of any of them would have deleted the
+  # pinode01 pod with no way to recreate it - and every one of the 28 volumes keeps both of its
+  # replicas on pinode01 and pinode02, so that single rollout would have dropped all of them to
+  # one replica at once. See cluster/00i-probe-timeout-budget.md, "Before rolling any DaemonSet".
+  #
+  # Longhorn propagates this value to its own components. Per the 1.7 setting reference the
+  # change is safe to make while volumes are attached: the components are simply NOT restarted,
+  # and the setting reports applied=false until all volumes are detached. It was set live on
+  # 2026-09-14 (kubectl -n longhorn-system patch settings.longhorn.io taint-toleration) and is
+  # recorded here so a later helm upgrade does not silently drop it again. Detaching every volume
+  # to make it take effect still needs its own maintenance window.
+  taintToleration: "studylife/relief=true:NoSchedule"
+
