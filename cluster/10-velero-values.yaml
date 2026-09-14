@@ -16,7 +16,7 @@ image:
 initContainers:
   # "AWS" plugin = velero's generic S3-API driver; R2 is S3-compatible. No AWS involved.
   - name: velero-plugin-for-aws
-    image: velero/velero-plugin-for-aws:v1.14.0 # arm64 verified too
+    image: velero/velero-plugin-for-aws:v1.14.2 # arm64 verified too
     volumeMounts:
       - name: plugins
         mountPath: /target
