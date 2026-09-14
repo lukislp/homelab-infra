@@ -15,8 +15,39 @@ image:
   tag: v1.18.2 # arm64 verified via docker manifest inspect before install
 initContainers:
   # "AWS" plugin = velero's generic S3-API driver; R2 is S3-compatible. No AWS involved.
+  #
+  # PINNED AT v1.14.0 ON PURPOSE - do NOT take Renovate's bump to v1.14.2.
+  # Tried live on 2026-09-14 and rolled back within twelve minutes. Every one of the 63 items
+  # was collected without a single error or warning, and then the final PutObject of
+  # velero-backup.json failed and took the whole backup with it:
+  #
+  #   operation error S3: PutObject, https response error StatusCode: 501,
+  #   api error NotImplemented: Header 'x-amz-tagging' with value '' not implemented
+  #
+  # The newer AWS SDK inside the plugin sends an EMPTY x-amz-tagging header on every PutObject.
+  # R2 does not implement object tagging and answers 501 rather than ignoring the header, so
+  # nothing lands in the bucket. This is the same class of R2 incompatibility as velero issue
+  # 7940 and the .NET SDK's x-amz-tagging-directive report; it is not something this repo can
+  # configure away, the header is unconditional.
+  #
+  # The velero SERVER bump in this same file (v1.18.1 -> v1.18.2) is unaffected and is live.
+  #
+  # Renovate will keep proposing the plugin bump, and that is deliberate: a later release may
+  # drop the header. Before merging any plugin bump, prove it with a real backup rather than a
+  # rollout check - a broken plugin still starts cleanly and still reports every item as backed
+  # up. The whole test takes twenty seconds:
+  #
+  #   kubectl -n velero apply -f - <<'EOF'
+  #   apiVersion: velero.io/v1
+  #   kind: Backup
+  #   metadata: {name: plugin-check, namespace: velero}
+  #   spec: {includedNamespaces: [cert-manager], snapshotVolumes: false, ttl: 2h}
+  #   EOF
+  #   kubectl -n velero get backups.velero.io plugin-check -o jsonpath='{.status.phase}'
+  #
+  # Note "backups.velero.io", not "backup" - the short name resolves to Longhorn's CRD here.
   - name: velero-plugin-for-aws
-    image: velero/velero-plugin-for-aws:v1.14.2 # arm64 verified too
+    image: velero/velero-plugin-for-aws:v1.14.0 # arm64 verified too; see warning above
     volumeMounts:
       - name: plugins
         mountPath: /target
