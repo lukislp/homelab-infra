@@ -91,11 +91,22 @@ As of 2026-09-13 that leaves only Longhorn's three DaemonSets (`longhorn-manager
 `longhorn-csi-plugin`, `engine-image-*`), which ship with **no** tolerations at all and are
 therefore on the same landmine: today they run on `pinode01` only because they were scheduled
 before the taint existed. The chart route is `defaultSettings.taintToleration` in
-`11-longhorn-values.yaml` (Longhorn propagates it to its own components), but applying it
-means a `helm upgrade` of the live storage layer with volumes attached, which is a change that
-wants its own maintenance window and its own verification - deliberately **not** bundled into
-a probe fix. Until then: do not roll a Longhorn DaemonSet without setting that first, or
-`pinode01` silently stops being a replica target.
+`11-longhorn-values.yaml` (Longhorn propagates it to its own components).
+
+**Status 2026-09-14: staged, not yet in effect.** The Longhorn 1.7 setting reference says the
+change is safe to make while volumes are attached - the components are simply not restarted -
+so the value was set live without a helm upgrade:
+
+```bash
+kubectl -n longhorn-system patch settings.longhorn.io taint-toleration   --type=merge -p '{"value":"studylife/relief=true:NoSchedule"}'
+```
+
+All 27 attached volumes stayed `attached/healthy` through it. The setting now reports
+`applied: false` and the three DaemonSets still carry no tolerations, exactly as documented:
+Longhorn applies it once every volume is detached. So the landmine is **still live today** -
+do not roll a Longhorn DaemonSet until `kubectl -n longhorn-system get settings.longhorn.io
+taint-toleration -o jsonpath='{.status.applied}'` reports `true`. The value is recorded in
+`11-longhorn-values.yaml` so a later helm upgrade cannot silently drop it.
 
 ## Not fixable from git
 
