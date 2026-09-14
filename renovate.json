@@ -28,9 +28,7 @@
     "dependencies",
     "kubernetes"
   ],
-  "schedule": [
-    "before 6am on monday"
-  ],
+  "schedule": ["at any time"],
   "minimumReleaseAge": "3 days",
   "prBodyNotes": [
     "**Merging is not the rollout.** Only the six files listed in `flux/infra-deploy/kustomization.yaml` are continuously reconciled by Flux (`monitoring/01-prometheus.yaml`, `05`, `06`, `07`, `11-otel-collector.yaml`, `12-tempo.yaml`). Everything else in `monitoring/`, `cluster/` and `flux/` is applied by hand after merge - normally `kubectl apply -f <the one changed file>`, or a `provisioning/bootstrap-cluster.ps1` run.",
