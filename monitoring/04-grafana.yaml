@@ -163,7 +163,7 @@ spec:
           # annotation table, 12->13 a move of folders/dashboards into unified storage) and
           # upstream supports no downgrade from either - the only rollback is restoring a
           # copy of grafana.db. That needs its own change with its own backup step.
-          image: grafana/grafana:11.6.16@sha256:d67af92050b8d93b393dc741864752a69c9da1ffa39c1bb9af49ad5d9e47d2c3
+          image: grafana/grafana:13.2.0@sha256:3fd54ae1214669f8355f065ec9f6445d5279a3d77095ab048ca045685272429b
           env:
             # GF_SERVER_* is Grafana's standard way to set any grafana.ini setting via an env
             # var (GF_<SECTION>_<KEY>) - no separate grafana.ini ConfigMap mount needed.
