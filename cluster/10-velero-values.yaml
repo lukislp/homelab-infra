@@ -12,7 +12,7 @@
 # and rotation commands in 00g-velero-backups.md.
 image:
   repository: velero/velero
-  tag: v1.18.1 # arm64 verified via docker manifest inspect before install
+  tag: v1.18.2 # arm64 verified via docker manifest inspect before install
 initContainers:
   # "AWS" plugin = velero's generic S3-API driver; R2 is S3-compatible. No AWS involved.
   - name: velero-plugin-for-aws
