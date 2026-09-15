@@ -131,7 +131,7 @@ spec:
           # the small-block settings are what keep block completion inside the 768Mi limit.
           # There is also no supported downgrade from 3.0 back to 2.x. See the PR that
           # introduced this pin for the full list.
-          image: grafana/tempo:2.10.8@sha256:f0561deb1c68ec44d6e6e7e4487f30106c4e5e768642077695b37958b105812a
+          image: grafana/tempo:3.0.3@sha256:0296560ac66f8a3600d7fb3014a52c189d4d9c3549ad6ff441bf2409855d68d5
           args: ["-config.file=/etc/tempo/tempo.yaml"]
           ports:
             - { name: otlp-grpc, containerPort: 4317 }
