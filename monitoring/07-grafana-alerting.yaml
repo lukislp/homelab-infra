@@ -42,7 +42,7 @@ data:
         interval: 1m
         rules:
           - uid: alert-web-down
-            title: "Web-App nicht erreichbar"
+            title: "Web app unreachable"
             condition: C
             for: 2m
             data:
@@ -59,9 +59,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: critical }
-            annotations: { summary: "Alle studylife-web-Pods sind down - die App ist für Nutzer nicht erreichbar." }
+            annotations: { summary: "All studylife-web pods are down - the app is unreachable for users." }
           - uid: alert-worker-down
-            title: "Worker nicht aktiv (Reminder/Report-Tick läuft nicht)"
+            title: "Worker not active (reminder/report tick not running)"
             condition: C
             for: 2m
             data:
@@ -78,9 +78,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Kein studylife-worker-Pod läuft - Reminder/Report-Erstellung findet nicht statt." }
+            annotations: { summary: "No studylife-worker pod is running - reminders and reports are not being generated." }
           - uid: alert-cnpg-degraded
-            title: "Datenbank-Cluster degradiert (weniger als 2 von 3 CNPG-Instanzen online)"
+            title: "Database cluster degraded (fewer than 2 of 3 CNPG instances online)"
             condition: C
             for: 3m
             data:
@@ -97,9 +97,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [2] } }] }
             labels: { severity: critical }
-            annotations: { summary: "Weniger als 2 CNPG-Instanzen online - bei einem weiteren Ausfall droht Downtime." }
+            annotations: { summary: "Fewer than 2 CNPG instances online - one more failure means downtime." }
           - uid: alert-redis-degraded
-            title: "Redis-Cluster degradiert (weniger als 5 von 6 Knoten online)"
+            title: "Redis cluster degraded (fewer than 5 of 6 nodes online)"
             condition: C
             for: 3m
             data:
@@ -116,9 +116,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [5] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Weniger als 5 Redis-Knoten online - Cache-Redundanz eingeschränkt." }
+            annotations: { summary: "Fewer than 5 Redis nodes online - cache redundancy is reduced." }
           - uid: alert-ingress-down
-            title: "Keine NGINX-Gateway-Fabric-Datenebene online"
+            title: "No NGINX Gateway Fabric data plane online"
             condition: C
             for: 2m
             data:
@@ -138,9 +138,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: critical }
-            annotations: { summary: "Keine NGINX-Gateway-Fabric-Datenebene erreichbar - der komplette Cluster ist von außen nicht erreichbar." }
+            annotations: { summary: "No NGINX Gateway Fabric data plane reachable - the entire cluster is unreachable from outside." }
           - uid: alert-npm-down
-            title: "NPM (externer Reverse-Proxy) auf mindestens einem Pi down"
+            title: "NPM (external reverse proxy) down on at least one Pi"
             condition: C
             for: 2m
             data:
@@ -157,9 +157,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [2] } }] }
             labels: { severity: warning }
-            annotations: { summary: "NPM läuft nicht mehr auf beiden Pis - die HA-Redundanz des externen Reverse-Proxys ist weg." }
+            annotations: { summary: "NPM is no longer running on both Pis - the HA redundancy of the external reverse proxy is gone." }
           - uid: alert-flux-errors
-            title: "Flux-Reconcile-Fehler anhaltend"
+            title: "Persistent Flux reconcile errors"
             condition: C
             for: 10m
             data:
@@ -176,7 +176,7 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [0] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Flux meldet seit mindestens 10 Minuten anhaltend Reconcile-Fehler - GitOps-Auto-Deploy funktioniert möglicherweise nicht." }
+            annotations: { summary: "Flux has been reporting persistent reconcile errors for at least 10 minutes - GitOps auto-deploy may not be working." }
           # certmanager_certificate_expiration_timestamp_seconds (new cert-manager scrape job,
           # k8s/14-prometheus.yaml) - without this alert, a silent certificate expiry would make
           # several services (studylife-web, Grafana, Uptime Kuma, piwatch, ...) unreachable all
@@ -185,7 +185,7 @@ data:
           # remaining lifetime means: automatic renewal is already overdue and hasn't
           # succeeded (yet).
           - uid: alert-cert-expiring
-            title: "Zertifikat läuft in weniger als 7 Tagen ab"
+            title: "Certificate expires in less than 7 days"
             condition: C
             for: 15m
             data:
@@ -202,7 +202,7 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [7] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Mindestens ein cert-manager-Zertifikat läuft in weniger als 7 Tagen ab - die automatische Erneuerung (30 Tage vorher) haette schon laengst greifen sollen." }
+            annotations: { summary: "At least one cert-manager certificate expires in less than 7 days - the automatic renewal (30 days ahead) should have taken effect long ago." }
           # From here on: 7 new rules from the previously unused CNPG exporter metrics +
           # Redis/node disk/piwatch. NOT added: a "no successful backup for X hours" alert -
           # verified live, cnpg_collector_last_available_backup_timestamp is permanently stuck
@@ -214,7 +214,7 @@ data:
           # and permanently from day 1. Until a more reliable metric exists, backup success
           # remains a manual/quarterly check (see "Postgres backups to Cloudflare R2").
           - uid: alert-cnpg-replication-lag
-            title: "Postgres-Replication-Lag zu hoch"
+            title: "Postgres replication lag too high"
             condition: C
             for: 3m
             data:
@@ -231,14 +231,14 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [60] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Mindestens eine CNPG-Replica haengt mehr als 60 Sekunden hinter dem Primary - bei einem Failover droht in dem Umfang Datenverlust." }
+            annotations: { summary: "At least one CNPG replica is more than 60 seconds behind the primary - a failover would lose that much data." }
           # `or vector(86400)`: the archiver metric is exported by the PRIMARY only, so during a
           # switchover the series moves from one instance to the next and the query is briefly
           # empty. Without a fallback Grafana turns that gap into a NoData notification - i.e. a
           # false alarm at exactly the moment a real database event happens (seen 2026-09-13
           # during the 16.4 -> 16.15 upgrade). A large fallback reads as "no recent failure".
           - uid: alert-cnpg-wal-archive-failed
-            title: "Postgres WAL-Archivierung schlaegt gerade fehl"
+            title: "Postgres WAL archiving is currently failing"
             condition: C
             for: 2m
             data:
@@ -255,9 +255,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [300] } }] }
             labels: { severity: critical }
-            annotations: { summary: "Ein WAL-Segment konnte in den letzten 5 Minuten nicht archiviert werden - ohne Fix droht ein wachsender Rueckstand und im Extremfall ein volles Storage-Volume." }
+            annotations: { summary: "A WAL segment could not be archived in the last 5 minutes - without a fix the backlog keeps growing and, in the worst case, fills the storage volume." }
           - uid: alert-cnpg-xid-wraparound
-            title: "Postgres Transaction-ID-Wraparound-Risiko"
+            title: "Postgres transaction ID wraparound risk"
             condition: C
             for: 10m
             data:
@@ -274,9 +274,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [150000000] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Mindestens eine Datenbank naehert sich dem Transaction-ID-Wraparound (autovacuum_freeze_max_age-Default liegt bei 200 Mio.) - Autovacuum pruefen, sonst droht ein DB-weiter Schreibstopp." }
+            annotations: { summary: "At least one database is approaching transaction ID wraparound (the autovacuum_freeze_max_age default is 200 million) - check autovacuum, otherwise a database-wide write stop is imminent." }
           - uid: alert-cnpg-manual-intervention
-            title: "Postgres braucht manuellen Eingriff (Switchover/Fencing)"
+            title: "Postgres needs manual intervention (switchover/fencing)"
             condition: C
             for: 1m
             data:
@@ -293,9 +293,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [0] } }] }
             labels: { severity: critical }
-            annotations: { summary: "CNPG meldet einen manuellen Switchover-Bedarf oder eine gefencte Instanz - der Operator kann das Problem nicht mehr automatisch loesen." }
+            annotations: { summary: "CNPG reports a required manual switchover or a fenced instance - the operator can no longer resolve the problem on its own." }
           - uid: alert-redis-memory-pressure
-            title: "Redis-Speicher nahe maxmemory"
+            title: "Redis memory close to maxmemory"
             condition: C
             for: 5m
             data:
@@ -312,9 +312,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [85] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Mindestens ein Redis-Knoten nutzt ueber 85% seines maxmemory-Limits (96MB) - Eviction unter allkeys-lru laeuft, Cache-Trefferquote koennte sinken." }
+            annotations: { summary: "At least one Redis node uses more than 85% of its maxmemory limit (96MB) - eviction under allkeys-lru is running, the cache hit rate may drop." }
           - uid: alert-node-disk-low
-            title: "Wenig Speicherplatz auf mindestens einem Pi"
+            title: "Low disk space on at least one Pi"
             condition: C
             for: 10m
             data:
@@ -331,9 +331,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [15] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Mindestens ein Pi hat weniger als 15% freien Speicherplatz auf der SD-Karte/dem Root-Dateisystem." }
+            annotations: { summary: "At least one Pi has less than 15% free disk space on its SD card / root filesystem." }
           - uid: alert-piwatch-down
-            title: "piwatch nicht erreichbar"
+            title: "piwatch unreachable"
             condition: C
             for: 2m
             data:
@@ -350,12 +350,12 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Kein piwatch-Pod laeuft mehr - das K8s-Live-Dashboard ist nicht erreichbar (Uptime Kuma/Grafana/Postgres/Redis selbst sind davon unabhaengig)." }
+            annotations: { summary: "No piwatch pod is running any more - the live K8s dashboard is unreachable (Uptime Kuma/Grafana/Postgres/Redis themselves are unaffected)." }
           # From here on: 7 more rules closing gaps found during a review of what's actually
           # scraped (k8s/14-prometheus.yaml) vs. what's actually alerted on - all metrics already
           # verified live via existing dashboards (k8s/17b/17c), same principle as above.
           - uid: alert-studylife-ai-down
-            title: "studylife-ai nicht erreichbar"
+            title: "studylife-ai unreachable"
             condition: C
             for: 2m
             data:
@@ -372,9 +372,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Kein studylife-ai-Pod antwortet auf /metrics - die RAG-Chat-Funktion ist ausgefallen, die Kern-App (Notizen/Kurse/Sessions) ist davon unabhaengig." }
+            annotations: { summary: "No studylife-ai pod responds on /metrics - the RAG chat feature is down, the core app (notes/courses/sessions) is unaffected." }
           - uid: alert-studylife-mcp-down
-            title: "studylife-mcp nicht erreichbar"
+            title: "studylife-mcp unreachable"
             condition: C
             for: 2m
             data:
@@ -391,9 +391,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Kein studylife-mcp-Pod antwortet auf /metrics - MCP-Clients (Claude etc.) koennen nicht mehr auf StudyLife zugreifen, die Web-App selbst ist davon unabhaengig." }
+            annotations: { summary: "No studylife-mcp pod responds on /metrics - MCP clients can no longer access StudyLife, the web app itself is unaffected." }
           - uid: alert-studylife-mcp-error-rate
-            title: "studylife-mcp Tool-Call-Fehlerrate hoch"
+            title: "studylife-mcp tool call error rate high"
             condition: C
             for: 10m
             noDataState: OK
@@ -401,17 +401,17 @@ data:
               - refId: A
                 relativeTimeRange: { from: 900, to: 0 }
                 datasourceUid: prometheus
-                # 15m-Fenster statt der ueblichen 5m, weil das Call-Volumen naturgemaess niedrig
-                # ist (ein paar Tool-Calls pro Konversation) - kurze Fenster waeren zu verrauscht.
-                # BUG gefunden live: 0/0 (keine Calls ueberhaupt im Fenster) ergibt in PromQL kein
-                # 0, sondern GAR KEIN Ergebnis (NaN wird aus dem Vektor gefiltert) - anders als
-                # angenommen wertet Grafana eine leere Query NICHT als "Bedingung nicht erfuellt",
-                # sondern feuert per Default einen eigenen "DatasourceNoData"-Alarm. clamp_min
-                # haelt den Nenner von echtem 0 fern (division bleibt definiert), das aeussere
-                # "or vector(0)" faengt zusaetzlich den Fall ab, dass die Zaehler-Metrik noch nie
-                # inkrementiert wurde und deshalb ueberhaupt keine Zeitreihe existiert - noDataState:
-                # OK oben als zusaetzliche Absicherung fuer alles, was trotzdem durchrutscht (z.B.
-                # ein kurzer Datasource-Timeout).
+                # 15m window instead of the usual 5m, because the call volume is naturally low
+                # (a few tool calls per conversation) - short windows would be too noisy.
+                # BUG found live: 0/0 (no calls at all within the window) does not produce a 0 in
+                # PromQL, it produces NO RESULT AT ALL (NaN is filtered out of the vector) - contrary
+                # to what was assumed, Grafana does NOT treat an empty query as "condition not met",
+                # it fires its own "DatasourceNoData" alert by default. clamp_min keeps the
+                # denominator away from a true 0 (the division stays defined), the outer
+                # "or vector(0)" additionally covers the case where the counter metric has never
+                # been incremented and therefore no time series exists at all - noDataState: OK
+                # above as an extra safeguard for anything that slips through anyway (e.g. a short
+                # datasource timeout).
                 model: { refId: A, expr: '(sum(rate(studylife_mcp_tool_calls_total{status="error"}[15m])) / clamp_min(sum(rate(studylife_mcp_tool_calls_total[15m])), 0.0001)) or vector(0)' }
               - refId: B
                 relativeTimeRange: { from: 900, to: 0 }
@@ -422,9 +422,9 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [0.05] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Mehr als 5% der studylife-mcp-Tool-Calls der letzten 15 Minuten schlagen fehl - deutet auf ein kaputtes Tool oder einen StudyLife-API-Fehler hin." }
+            annotations: { summary: "More than 5% of the studylife-mcp tool calls in the last 15 minutes are failing - points to a broken tool or a StudyLife API error." }
           - uid: alert-coredns-down
-            title: "CoreDNS nicht erreichbar"
+            title: "CoreDNS unreachable"
             condition: C
             for: 2m
             data:
@@ -441,20 +441,20 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: critical }
-            annotations: { summary: "CoreDNS laeuft nur mit 1 Replica (live geprueft) - faellt sie aus, ist Cluster-interne Namensaufloesung komplett weg, betrifft praktisch jeden anderen Dienst." }
+            annotations: { summary: "CoreDNS runs with only 1 replica (verified live) - if it fails, cluster-internal name resolution is gone entirely, which affects practically every other service." }
           - uid: alert-metallb-degraded
-            title: "MetalLB degradiert (Controller oder Speaker down)"
+            title: "MetalLB degraded (controller or speaker down)"
             condition: C
             for: 2m
             data:
               - refId: A
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: prometheus
-                # Additiv statt getrennter Alerts, gleiches Muster wie alert-cnpg-manual-intervention:
-                # Controller-Ausfall (keine neuen LB-IP-Zuweisungen mehr) und Speaker-Ausfall (ein
-                # Pi kuendigt seine VIPs nicht mehr per L2 an) sind beides "MetalLB degradiert",
-                # nur die Schwere unterscheidet sich nicht genug fuer zwei Regeln. Live geprueft:
-                # 1 Controller + 2 Speaker (einer je Pi).
+                # Additive instead of separate alerts, same pattern as alert-cnpg-manual-intervention:
+                # a controller outage (no new LB IP assignments) and a speaker outage (one Pi no
+                # longer announces its VIPs via L2) are both "MetalLB degraded", and their severity
+                # does not differ enough to justify two rules. Verified live: 1 controller +
+                # 2 speakers (one per Pi).
                 model: { refId: A, expr: '((count(up{job="metallb",component="controller"} == 1) or vector(0)) < bool 1) + ((count(up{job="metallb",component="speaker"} == 1) or vector(0)) < bool 2)' }
               - refId: B
                 relativeTimeRange: { from: 300, to: 0 }
@@ -465,19 +465,19 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [0] } }] }
             labels: { severity: warning }
-            annotations: { summary: "MetalLB-Controller oder mindestens ein Speaker-Pod ist down - LoadBalancer-IP-Vergabe bzw. L2-Announcement auf mindestens einem Pi ist beeintraechtigt." }
+            annotations: { summary: "The MetalLB controller or at least one speaker pod is down - LoadBalancer IP assignment or L2 announcement on at least one Pi is impaired." }
           - uid: alert-log-pipeline-degraded
-            title: "Log-Pipeline degradiert (Loki/Promtail)"
+            title: "Log pipeline degraded (Loki/Promtail)"
             condition: C
             for: 5m
             data:
               - refId: A
                 relativeTimeRange: { from: 600, to: 0 }
                 datasourceUid: prometheus
-                # Additiv, gleiches Muster wie bei MetalLB oben: Loki down, zu wenige Promtail-Pods
-                # (erwartet: 2, einer je Node) und tatsaechlich verworfene Zeilen sind drei
-                # unabhaengige Symptome derselben Pipeline - genau die zwei Fehlerbilder, die beim
-                # ersten echten Deploy gefunden wurden (docs/decisions.md im studylife-mcp-Repo).
+                # Additive, same pattern as MetalLB above: Loki down, too few Promtail pods
+                # (expected: 2, one per node) and actually dropped lines are three independent
+                # symptoms of the same pipeline - exactly the two failure modes found during the
+                # first real deploy (docs/decisions.md in the studylife-mcp repo).
                 model: { refId: A, expr: '((count(up{job="loki"} == 1) or vector(0)) < bool 1) + ((count(up{job="promtail"} == 1) or vector(0)) < bool 2) + ((sum(rate(promtail_dropped_entries_total[10m])) or vector(0)) > bool 0)' }
               - refId: B
                 relativeTimeRange: { from: 600, to: 0 }
@@ -488,19 +488,19 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [0] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Loki ist down, es laeuft weniger als ein Promtail-Pod pro Node, oder Promtail verwirft aktuell Log-Zeilen - die Log-Aggregation ist beeintraechtigt, die App-Funktionalitaet selbst nicht." }
+            annotations: { summary: "Loki is down, fewer than one Promtail pod per node is running, or Promtail is currently dropping log lines - log aggregation is impaired, app functionality itself is not." }
           - uid: alert-pod-restart-storm
-            title: "Ungewoehnlich viele Pod-Neustarts clusterweit"
+            title: "Unusually many pod restarts cluster-wide"
             condition: C
             for: 5m
             data:
               - refId: A
                 relativeTimeRange: { from: 1800, to: 0 }
                 datasourceUid: prometheus
-                # Bewusst OHNE Namespace-Filter (anders als das bestehende Neustarts-Panel im
-                # Ueberblick-Dashboard, das nur studylife-scale zeigt) - ein clusterweites
-                # Fruehwarnsignal fuer "irgendwas crashloopt gerade", unabhaengig davon in
-                # welchem Namespace.
+                # Deliberately WITHOUT a namespace filter (unlike the existing restarts panel in the
+                # overview dashboard, which only shows studylife-scale) - a cluster-wide early
+                # warning signal for "something is crash-looping right now", no matter which
+                # namespace it happens in.
                 model: { refId: A, expr: 'sum(increase(kube_pod_container_status_restarts_total[30m])) or vector(0)' }
               - refId: B
                 relativeTimeRange: { from: 1800, to: 0 }
@@ -511,13 +511,13 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [5] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Mehr als 5 Container-Neustarts in den letzten 30 Minuten, ueber alle Namespaces summiert - deutet auf ein akutes Crash-Loop-Problem irgendwo im Cluster hin." }
-          # "Wer ueberwacht den Waechter": Uptime Kuma ueberwacht alle anderen Dienste (inkl.
-          # Grafana selbst), aber bisher ueberwachte nichts Uptime Kuma - faellt es aus, faellt
-          # sowohl die externe Erreichbarkeitspruefung als auch die Telegram-Benachrichtigung
-          # lautlos weg. Gleiches Muster wie alert-piwatch-down.
+            annotations: { summary: "More than 5 container restarts in the last 30 minutes, summed across all namespaces - points to an acute crash-loop problem somewhere in the cluster." }
+          # "Who watches the watchman": Uptime Kuma monitors all other services (including
+          # Grafana itself), but so far nothing monitored Uptime Kuma - if it fails, both the
+          # external reachability check and the Telegram notification silently disappear.
+          # Same pattern as alert-piwatch-down.
           - uid: alert-uptime-kuma-down
-            title: "Uptime Kuma nicht erreichbar"
+            title: "Uptime Kuma unreachable"
             condition: C
             for: 2m
             data:
@@ -534,14 +534,14 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Kein uptime-kuma-Pod laeuft mehr - externe Erreichbarkeitspruefung UND Telegram-Benachrichtigung fallen beide gleichzeitig aus, ohne dass irgendetwas anderes das meldet." }
+            annotations: { summary: "No uptime-kuma pod is running any more - the external reachability check AND the Telegram notification fail at the same time, with nothing else reporting it." }
           # autodoc was the last app without a reachability rule - and the nightly collector
           # push can fail silently (the docs just go stale). Both metrics verified live before
           # adding: kube_deployment_status_replicas_available existed already, jobs/cronjobs
           # were added to kube-state-metrics' restricted --resources list for the second rule
           # (03-kube-state-metrics.yaml).
           - uid: alert-autodoc-down
-            title: "homelab-autodoc nicht erreichbar"
+            title: "homelab-autodoc unreachable"
             condition: C
             for: 2m
             data:
@@ -558,7 +558,7 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: lt, params: [1] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Kein autodoc-server-Pod laeuft mehr - die Cluster-Doku (autodoc.lukas2311-homelab.com) ist weg und naechtliche Collector-Pushes laufen ins Leere." }
+            annotations: { summary: "No autodoc-server pod is running any more - the cluster documentation (autodoc.lukas2311-homelab.com) is gone and nightly collector pushes go nowhere." }
           # Fires when the last SUCCESSFUL collector job finished more than 26h ago (nightly
           # schedule is 02:00, so >26h means at least one full run was missed or failed).
           # kube_job_status_completion_time only exists for succeeded jobs, and the CronJob
@@ -566,7 +566,7 @@ data:
           # operation. The "or vector(0)" makes a MISSING metric (collector never succeeded,
           # kube-state-metrics broken) count as infinitely stale instead of NoData-silence.
           - uid: alert-autodoc-collector-stale
-            title: "autodoc-Collector-Push ueberfaellig (letzter Erfolg vor mehr als 26h)"
+            title: "autodoc collector push overdue (last success more than 26h ago)"
             condition: C
             for: 15m
             data:
@@ -583,7 +583,7 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [93600] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Der naechtliche autodoc-Collector-Lauf (02:00) hatte seit ueber 26 Stunden keinen Erfolg - die Doku-Site zeigt veraltete Daten (Freshness-Stempel prueft nur, wer aktiv hinschaut)." }
+            annotations: { summary: "The nightly autodoc collector run (02:00) has not succeeded for more than 26 hours - the docs site shows stale data (the freshness stamp is only checked by whoever actively looks)." }
           # Same staleness pattern as the collector rule above, for the Velero nightly PVC
           # backup (03:00, cluster/10-velero-values.yaml). Metric verified live after the
           # first manual backup run; "or vector(0)" again turns a missing metric (Velero
@@ -594,7 +594,7 @@ data:
           # The 26h lookback keeps the last success visible across restart gaps, while a
           # genuinely stale or absent Velero still ages out of the window and fires.
           - uid: alert-velero-backup-stale
-            title: "Velero-PVC-Backup ueberfaellig (letzter Erfolg vor mehr als 26h)"
+            title: "Velero PVC backup overdue (last success more than 26h ago)"
             condition: C
             for: 15m
             data:
@@ -611,4 +611,4 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [93600] } }] }
             labels: { severity: warning }
-            annotations: { summary: "Das naechtliche Velero-Backup der App-PVCs (03:00 nach R2) hatte seit ueber 26 Stunden keinen Erfolg - uptime-kuma/grafana/autodoc/homelab-hub/qdrant-Daten laufen ohne aktuellen Offsite-Stand." }
+            annotations: { summary: "The nightly Velero backup of the app PVCs (03:00 to R2) has not succeeded for more than 26 hours - uptime-kuma/grafana/autodoc/homelab-hub/qdrant data have no current offsite copy." }
