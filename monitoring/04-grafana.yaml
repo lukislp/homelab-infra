@@ -176,17 +176,29 @@ spec:
             - { name: GF_SERVER_PROTOCOL, value: https }
             - { name: GF_SERVER_CERT_FILE, value: /etc/grafana-backend-tls/tls.crt }
             - { name: GF_SERVER_CERT_KEY, value: /etc/grafana-backend-tls/tls.key }
+            # Go only sizes its heap against the machine's memory unless told otherwise, so without this
+            # the garbage collector has no idea a 768Mi cgroup ceiling exists - it grows to roughly twice
+            # the live heap and the kernel OOM-kills the container before a collection ever runs. Set to
+            # 640MiB, a soft target the runtime collects harder to stay under, leaving 128Mi of hard
+            # headroom above it. Measured peak on 13.2.0 during the first start (plugin extraction plus
+            # the unified-storage migration) was 449Mi RSS, settling to ~360Mi, so 640MiB is well clear of
+            # steady state and will not cause GC thrashing.
+            - { name: GOMEMLIMIT, value: 640MiB }
           ports:
             - containerPort: 3000
           resources:
-            # Raised 256Mi -> 512Mi with the 13.x jump. Live usage on 11.6.16 was 107Mi, but 13
+            # Raised 256Mi -> 768Mi across the 13.x jump. Live usage on 11.6.16 was 107Mi, but 13
             # carries a higher baseline and runs the unified-storage migration against this PVC on
             # its first start, a one-off cost on top. 256Mi left roughly 150Mi of headroom for both,
             # the same thin margin that has OOMKilled prometheus twice in this cluster. 512Mi is a
             # ceiling, not a reservation - the request stays at 128Mi. Revisit once 13.x steady state
             # has been measured for a few days.
+            # Second correction after the rollout: 512Mi was not enough of a ceiling. The first start
+            # peaked at 449Mi RSS with only 54Mi of that reclaimable cache, i.e. 88% of the limit, and Go
+            # had no GOMEMLIMIT to collect against. 768Mi plus the soft limit above turns that from an
+            # OOM waiting for a heavy query into a bounded, self-correcting workload.
             requests: { cpu: 50m, memory: 128Mi }
-            limits: { cpu: 300m, memory: 512Mi }
+            limits: { cpu: 300m, memory: 768Mi }
           volumeMounts:
             - { name: data, mountPath: /var/lib/grafana }
             - { name: datasources, mountPath: /etc/grafana/provisioning/datasources }
