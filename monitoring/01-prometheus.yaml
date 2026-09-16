@@ -247,6 +247,23 @@ data:
           - source_labels: [__meta_kubernetes_pod_ip]
             target_label: __address__
             replacement: "${1}:3100"
+      # Tempo (monitoring/12-tempo.yaml) - same role:pod + pod-IP rewrite shape as loki above.
+      # Added 2026-09-16: Tempo was the ONLY component in this namespace never scraped, which is
+      # why there was not a single tempo_ metric anywhere and its trace throughput could only be
+      # guessed at from the PVC size. Needs the matching prometheus entry in allow-ingress-to-tempo
+      # (cluster/05-network-policies-monitoring.yaml) - the policy previously allowed port 3200 only
+      # from grafana, so a scrape job on its own would just report the target as down.
+      - job_name: tempo
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [monitoring] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: tempo
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:3200"
       # Promtail (k8s/19-promtail.yaml) - DaemonSet, one target per node (same role:pod +
       # per-pod discovery pattern as node-exporter above, not a single aggregate target).
       # sent/dropped entry counters are the direct signal for the two root causes found the
