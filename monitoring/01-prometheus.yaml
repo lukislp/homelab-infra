@@ -490,19 +490,18 @@ spec:
           # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
           # readable tag: the tag alone still resolves through a mutable registry pointer, the
           # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
-          # Deliberately still 2.x, and the version is unchanged by this pin: v2.55.1 is the
-          # LAST 2.x release (2.53.x is only the parallel LTS branch), so there is no
-          # same-major upgrade left to take. v2.55.1 also happens to be the exact version
-          # upstream requires you to be on before jumping to 3.x, and the only version 3.x
-          # can be rolled back to - so this is the right launch pad, not a dead end.
-          # The 3.x jump is left as its own change because its risks are query-shaped, not
-          # startup-shaped: le/quantile label values get normalised on ingestion (le="1"
-          # becomes le="1.0"), range selectors become left-open, and "." in a regex matcher
-          # starts matching newlines. None of that crashes a pod - it quietly changes what
-          # dashboards and alert rules return, which needs a human watching panels rather
-          # than a green readiness probe. See the PR that introduced this pin for the full
-          # audit of this file against the 3.0 migration guide.
-          image: prom/prometheus:v2.55.1@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3
+          # Jumped here from v2.55.1, which was the required launch pad: it is the last 2.x
+          # release and the only version 3.x can be rolled back to, so reverting this commit is
+          # a complete rollback path. Note it does not undo data - samples ingested under 3.x
+          # keep their normalised le="1.0" labels for the 30d retention.
+          # The three query-shaped 3.0 risks were audited against this exact file before the
+          # jump and none of them bite here: nothing hardcodes an le=/quantile= matcher (all 51
+          # histogram_quantile uses group by (le), which is label-value agnostic), the only
+          # regex matcher containing a "." matches a job_name and those never hold a newline,
+          # and no range selector is shorter than [1m], so left-open ranges still leave rate()
+          # two samples at the 30s scrape interval. What the upgrade does cost is head memory
+          # during the changeover - see the resources block below.
+          image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
           args:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
@@ -527,8 +526,20 @@ spec:
             # 883Mi and climbing): the scrape surface grew another notch - redis exporter (added
             # with Redis AUTH), studylife-mcp /metrics, and more app pods after the August
             # refactoring rounds. pinode02 sits at ~67% of 8GB, so 1.5Gi fits comfortably.
+            # Raised 1.5Gi -> 2Gi together with the 3.x image in this same commit: Prometheus 3
+            # normalises le/quantile label values on ingestion (le="1" becomes le="1.0"), which
+            # gives every histogram bucket series a new identity. 72k of this instance's 169k
+            # head series are _bucket series, so the head carries the old and the new set side by
+            # side until the stale ones age out - on top of the cold-start WAL replay that the
+            # Recreate strategy forces. Steady state was 919Mi against the old 1536Mi limit, and
+            # this pod has already been OOMKilled at two earlier limits (512Mi, then 1Gi), so
+            # that headroom was too thin for the one-off transition. 2Gi is a ceiling, not a
+            # reservation - the request stays at 512Mi and pinode02 (the binding constraint at
+            # ~80% of 8GB) is not asked to set anything aside. Revisit once 3.x steady-state
+            # usage has been measured for a few days; if it lands near the old figure, this can
+            # go back to 1536Mi.
             requests: { cpu: 100m, memory: 512Mi }
-            limits: { cpu: 500m, memory: 1536Mi }
+            limits: { cpu: 500m, memory: 2Gi }
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus
