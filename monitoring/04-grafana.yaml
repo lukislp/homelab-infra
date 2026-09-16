@@ -154,16 +154,22 @@ spec:
           # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
           # readable tag: the tag alone still resolves through a mutable registry pointer, the
           # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
-          # 11.3.1 -> 11.6.16, the last release of the 11.x line: minor bumps within the same
-          # major, no database schema rewrite, and the provisioning file formats are
-          # untouched. This is explicitly a stopgap, not a destination - the whole 11 line
-          # reached end of support on 2026-06-25 and receives no further security patches.
-          # Grafana 12 and 13 are the real work and are deliberately NOT taken here: both
-          # hops run an irreversible migration on this PVC (11->12 a full rewrite of the
-          # annotation table, 12->13 a move of folders/dashboards into unified storage) and
-          # upstream supports no downgrade from either - the only rollback is restoring a
-          # copy of grafana.db. That needs its own change with its own backup step.
-          image: grafana/grafana:11.6.16@sha256:d67af92050b8d93b393dc741864752a69c9da1ffa39c1bb9af49ad5d9e47d2c3
+          # 11.6.16 -> 13.2.0, taking both irreversible hops at once: 11->12 rewrites the
+          # annotation table, 12->13 moves folders and dashboards into unified storage.
+          # Upstream supports no downgrade from either, so reverting this commit does NOT undo
+          # the migration - the only rollback is restoring a copy of grafana.db. Take a fresh one
+          # before applying: the nightly Velero run covers this PVC (see the backup.velero.io
+          # annotation above) but is up to 24h old, and what lives only in grafana.db is the
+          # manually-configured Telegram contact point, the notification policy and the admin
+          # password. Everything else re-provisions from Git. Taken now because 11.x reached end
+          # of support on 2026-06-25 and gets no further security patches.
+          # The dashboard side was cleared first in its own change: npm-official.json was the only
+          # dashboard in this repo carrying Angular panel types (dropped in Grafana 12) and it was
+          # redundant with npm.json - see 06-grafana-community-dashboards.yaml. The provisioning
+          # formats are unaffected: datasources, dashboard provider and alerting are all
+          # apiVersion 1, which 13 still reads, and only core datasources (prometheus/loki/tempo)
+          # are in use, no plugins to go stale.
+          image: grafana/grafana:13.2.0@sha256:3fd54ae1214669f8355f065ec9f6445d5279a3d77095ab048ca045685272429b
           env:
             # GF_SERVER_* is Grafana's standard way to set any grafana.ini setting via an env
             # var (GF_<SECTION>_<KEY>) - no separate grafana.ini ConfigMap mount needed.
@@ -173,8 +179,14 @@ spec:
           ports:
             - containerPort: 3000
           resources:
+            # Raised 256Mi -> 512Mi with the 13.x jump. Live usage on 11.6.16 was 107Mi, but 13
+            # carries a higher baseline and runs the unified-storage migration against this PVC on
+            # its first start, a one-off cost on top. 256Mi left roughly 150Mi of headroom for both,
+            # the same thin margin that has OOMKilled prometheus twice in this cluster. 512Mi is a
+            # ceiling, not a reservation - the request stays at 128Mi. Revisit once 13.x steady state
+            # has been measured for a few days.
             requests: { cpu: 50m, memory: 128Mi }
-            limits: { cpu: 300m, memory: 256Mi }
+            limits: { cpu: 300m, memory: 512Mi }
           volumeMounts:
             - { name: data, mountPath: /var/lib/grafana }
             - { name: datasources, mountPath: /etc/grafana/provisioning/datasources }
