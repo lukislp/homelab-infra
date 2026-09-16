@@ -245,5 +245,11 @@ spec:
         - { protocol: TCP, port: 4317 }
     - from:
         - podSelector: { matchLabels: { app: grafana } } # datasource queries (Explore)
+        # Prometheus scrapes Tempo's own /metrics on the same port (job "tempo" in
+        # monitoring/01-prometheus.yaml). Without this entry the scrape is refused and the job
+        # simply reports the target as down - Tempo was the only component in this namespace
+        # running completely unmonitored until 2026-09-16 because of exactly that gap. Same
+        # shape as the prometheus entry in allow-ingress-to-loki above.
+        - podSelector: { matchLabels: { app: prometheus } } # /metrics scrape
       ports:
         - { protocol: TCP, port: 3200 }
