@@ -120,17 +120,34 @@ spec:
           # Pinned by the multi-arch index digest (arm64 entry verified) on top of the
           # readable tag: the tag alone still resolves through a mutable registry pointer, the
           # digest is what containerd actually pulls. Renovate keeps tag and digest in step.
-          # Deliberately still 2.x, and the version is unchanged by this pin: 2.10.8 is the
-          # newest 2.x release and the 2.10 line is still actively patched, so nothing is
-          # being left to rot here.
-          # Tempo 3.0 is a separate decision and a large one. It replaces ingesters and the
-          # compactor with block-builders, live-stores and a backend scheduler/worker, and
-          # Tempo hard-fails on unknown config keys - so the "ingester:" and "compactor:"
-          # blocks above both have to GO, not just be renamed. Those blocks are not
-          # decoration: they exist because this pod OOM-looped on a Pi node (2026-09-04) and
-          # the small-block settings are what keep block completion inside the 768Mi limit.
-          # There is also no supported downgrade from 3.0 back to 2.x. See the PR that
-          # introduced this pin for the full list.
+            # Deliberately still 2.x: 2.10.8 is the newest 2.x release and that line is still actively
+            # patched, so nothing is being left to rot here.
+            # Tempo 3.0 was evaluated properly on 2026-09-16 and REJECTED for this cluster - this is a
+            # decision, not a deferral. Do not merge a 3.x bump; see the Renovate rule that now blocks
+            # them from even being offered.
+            # Verified by running the 3.0.3 image against this exact ConfigMap with -config.verify, with
+            # the running deployment untouched:
+            #     failed parsing config: yaml: unmarshal errors:
+            #       line 17: field ingester not found in type app.Config
+            #       line 26: field compactor not found in type app.Config
+            # Since this file is reconciled by Flux, merging the bump would have CrashLooped Tempo within
+            # five minutes. The cause is architectural, not renamed keys: ingester becomes live-store plus
+            # block-builder, compactor becomes backend-scheduler plus backend-worker, and a new ingest
+            # component requires a Kafka-compatible broker. That path cannot be switched off - the only
+            # disable flag is -ingest.disable-kafka-telemetry, which merely silences the Kafka client's own
+            # telemetry; the other seventeen ingest flags all presuppose a broker (address, topic,
+            # consumer-group, sasl-username, sasl-password).
+            # The deciding argument is proportion. A broker needs roughly 1GB of RAM - more than Grafana
+            # and Tempo combined - to serve a store that holds 52MiB of traces and idles at 131Mi and 3m
+            # CPU. No node has that comfortably: pinode02 has the most free memory but is the busiest, and
+            # pinode03 has room but its root filesystem is the SD card, which is the worst possible home
+            # for a write-ahead log (see the restart-storm history in docs/).
+            # Note also what the ingester/compactor blocks above actually do: they are not decoration. This
+            # pod OOM-looped on a Pi node (2026-09-04) and the small-block settings are what keep block
+            # completion inside the 768Mi limit. Under 3.x those knobs move to block-builder/live-store and
+            # that protection would have to be re-derived from scratch.
+            # Revisit only if Tempo ever ships a broker-less mode, or if this cluster grows a Kafka-class
+            # component for some other reason and it stops being a dedicated cost.
           image: grafana/tempo:2.10.8@sha256:f0561deb1c68ec44d6e6e7e4487f30106c4e5e768642077695b37958b105812a
           args: ["-config.file=/etc/tempo/tempo.yaml"]
           ports:
