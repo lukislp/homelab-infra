@@ -47,7 +47,7 @@ initContainers:
   #
   # Note "backups.velero.io", not "backup" - the short name resolves to Longhorn's CRD here.
   - name: velero-plugin-for-aws
-    image: velero/velero-plugin-for-aws:v1.14.0 # arm64 verified too; see warning above
+    image: velero/velero-plugin-for-aws:v1.14.3 # arm64 verified too; see warning above
     volumeMounts:
       - name: plugins
         mountPath: /target
