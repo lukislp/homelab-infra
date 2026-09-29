@@ -88,11 +88,12 @@ data:
       # Separate job rather than widening the regex: alert-cnpg-degraded counts up{job="cnpg"}
       # against studylife-pg's instance count, and the CNPG community dashboard filters by
       # namespace, so a second job keeps both unchanged. Same TLS trade-off and pooler
-      # exclusion as above (no pooler here today, harmless if one is ever added).
+      # exclusion as above (no pooler here today, harmless if one is ever added). Plain HTTP,
+      # not HTTPS like studylife-pg: claude-queue-pg does not set spec.monitoring.tls.enabled,
+      # so its exporter answers on 9187 without TLS (confirmed live: the https variant failed
+      # with "server gave HTTP response to HTTPS client").
       - job_name: cnpg-claude-queue
-        scheme: https
-        tls_config:
-          insecure_skip_verify: true
+        scheme: http
         kubernetes_sd_configs:
           - role: pod
             namespaces: { names: [claude-queue] }
