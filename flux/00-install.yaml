@@ -23,8 +23,43 @@ metadata:
   name: allow-egress
   namespace: flux-system
 spec:
+  # Was the Flux default `- {}` (allow everything) - the last catch-all egress rule in the
+  # cluster after the 2026-09-13 batch. Flux needs exactly: its own namespace (kustomize-
+  # controller fetches artifacts from source-controller), DNS, the API server (post-DNAT, so
+  # the k3s server endpoint, not the ClusterIP), and HTTPS to GitHub/GHCR for the Git sources,
+  # image reflector/automation and pushes. Cluster and LAN ranges are excluded from the
+  # internet rule so a compromised controller cannot pivot into pods or the home network.
   egress:
-  - {}
+  - to:
+    - podSelector: {}
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: 192.168.20.200/32 # pinode01, the k3s server (kubernetes endpoint)
+    ports:
+    - port: 6443
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.42.0.0/16
+        - 10.43.0.0/16
+        - 192.168.0.0/16
+    ports:
+    - port: 443
+      protocol: TCP
   ingress:
   - from:
     - podSelector: {}
