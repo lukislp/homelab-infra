@@ -71,11 +71,15 @@ defaultSettings:
   # same card. Either give pinode03 a disk on its USB storage, or set allowScheduling=false on its
   # Longhorn disk, before relying on this setting to spread replicas.
 
-  # storageMinimalAvailablePercentage default is high (25%) and assumes real server disks;
-  # pinode03 (57GB ephemeral storage) is far smaller than pinode01/02 (229GB) but actual
-  # data volume across the whole cluster is currently ~5GB total (verified live: prometheus
-  # 1.3G, loki 308M, postgres ~608M per instance, everything else sub-256M) - default is
-  # fine, left unset deliberately rather than guessing a number without more data.
+  # storageMinimalAvailablePercentage: the 25% default assumes real server disks. On 2026-09-29
+  # pinode02's disk (228Gi, 50Gi free, ~54Gi scheduled) reported Schedulable=False against the
+  # default's 57Gi reserve - with pinode03's disk deliberately unschedulable (SD card), that
+  # left pinode01 as the ONLY node able to take new replicas. Actual data across the cluster
+  # is ~5GB; the free space is eaten by the OS side of the same disk, not by Longhorn. 15%
+  # (34Gi reserve) keeps both SSD nodes schedulable and still leaves far more headroom than the
+  # volumes need. Set live first (setting applied=true immediately, pinode02 schedulable again),
+  # recorded here so the next helm upgrade does not put 25% back.
+  storageMinimalAvailablePercentage: 15
   #
   # guaranteedInstanceManagerCPU left at chart default deliberately - this chart version
   # (1.7.2) exposes no direct memory/CPU resource-request knobs for longhornManager/
