@@ -204,15 +204,36 @@ data:
             labels: { severity: warning }
             annotations: { summary: "At least one cert-manager certificate expires in less than 7 days - the automatic renewal (30 days ahead) should have taken effect long ago." }
           # From here on: 7 new rules from the previously unused CNPG exporter metrics +
-          # Redis/node disk/piwatch. NOT added: a "no successful backup for X hours" alert -
-          # verified live, cnpg_collector_last_available_backup_timestamp is permanently stuck
-          # at 0 for us (presumably a limitation of the classic barmanObjectStore path, see the
-          # Barman Cloud deprecation note above, not of the newer plugin backup path) and
-          # cnpg_collector_last_failed_backup_timestamp shows a long-superseded one-off failure
-          # (~16h old), even though the actual ScheduledBackup has long since run cleanly again
-          # according to "kubectl get backup" - an alert on this metric would fire incorrectly
-          # and permanently from day 1. Until a more reliable metric exists, backup success
-          # remains a manual/quarterly check (see "Postgres backups to Cloudflare R2").
+          # Redis/node disk/piwatch.
+          # Backup freshness (added 2026-09-29): the in-tree cnpg_collector_last_available_backup_
+          # timestamp was unusable for an alert (stuck at 0 on replicas, and for a long time on
+          # the primary too - see the git history of this comment), so backup success was a manual
+          # check. The Barman Cloud Plugin exposes barman_cloud_cloudnative_pg_io_last_available_
+          # backup_timestamp on the instance exporter, verified live on claude-queue-pg right
+          # after its migration (real epoch of the on-demand backup, last_failed = 0). Until
+          # studylife-pg is migrated too, the expression falls back to the in-tree metric there
+          # (its primary does report the 03:00 backup correctly today). Per namespace: each
+          # cluster fires on its own. 26h lookback + max_over_time keeps the last success visible
+          # across instance restarts (same reasoning as alert-velero-backup-stale below).
+          - uid: alert-cnpg-backup-stale
+            title: "Postgres base backup overdue (last success more than 26h ago)"
+            condition: C
+            for: 15m
+            data:
+              - refId: A
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: prometheus
+                model: { refId: A, expr: 'time() - max by (namespace) (max_over_time((barman_cloud_cloudnative_pg_io_last_available_backup_timestamp or cnpg_collector_last_available_backup_timestamp)[26h:1m]))' }
+              - refId: B
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: B, type: reduce, expression: A, reducer: last }
+              - refId: C
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [93600] } }] }
+            labels: { severity: warning }
+            annotations: { summary: "The daily base backup of a Postgres cluster (studylife-pg 03:00, claude-queue-pg 02:00, both to R2) has not succeeded for more than 26 hours - point-in-time recovery would have to replay from an ageing base." }
           - uid: alert-cnpg-replication-lag
             title: "Postgres replication lag too high"
             condition: C

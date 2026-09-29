@@ -84,6 +84,32 @@ data:
           # just an internal meta-label and never ends up as a real "namespace" label on the series.
           - source_labels: [__meta_kubernetes_namespace]
             target_label: namespace
+      # claude-queue's Postgres was never scraped (the job above keeps only studylife-pg).
+      # Separate job rather than widening the regex: alert-cnpg-degraded counts up{job="cnpg"}
+      # against studylife-pg's instance count, and the CNPG community dashboard filters by
+      # namespace, so a second job keeps both unchanged. Same TLS trade-off and pooler
+      # exclusion as above (no pooler here today, harmless if one is ever added).
+      - job_name: cnpg-claude-queue
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [claude-queue] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+            regex: claude-queue-pg
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_cnpg_io_poolerName]
+            regex: ""
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: "${1}:9187"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
       - job_name: redis
         kubernetes_sd_configs:
           - role: pod

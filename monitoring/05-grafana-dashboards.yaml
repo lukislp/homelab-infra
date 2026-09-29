@@ -98,7 +98,7 @@ data:
         { "id": 6, "title": "Letztes DB-Backup", "type": "stat", "gridPos": { "h": 6, "w": 4, "x": 20, "y": 0 },
           "description": "Zeitpunkt des letzten erfolgreichen CloudNativePG-Backups nach R2 (falls aktiviert).",
           "fieldConfig": { "defaults": { "unit": "dateTimeAsIso" } },
-          "targets": [{ "expr": "cnpg_collector_last_available_backup_timestamp * 1000", "refId": "A" }] },
+          "targets": [{ "expr": "(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp or cnpg_collector_last_available_backup_timestamp) * 1000", "refId": "A" }] },
         { "id": 7, "title": "CPU-Auslastung (Cluster-Durchschnitt)", "type": "gauge", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
           "description": "Über alle Nodes gemittelt. Ab hier lohnt ein Blick ins Cluster-Übersicht-Dashboard.",
           "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
@@ -214,7 +214,7 @@ data:
           "targets": [{ "expr": "cnpg_pg_replication_streaming_replicas", "legendFormat": "{{pod}}", "refId": "A" }] },
         { "id": 5, "title": "Letztes verfügbares Backup", "type": "stat", "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
           "fieldConfig": { "defaults": { "unit": "dateTimeAsIso" } },
-          "targets": [{ "expr": "cnpg_collector_last_available_backup_timestamp * 1000", "refId": "A" }] }
+          "targets": [{ "expr": "(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp or cnpg_collector_last_available_backup_timestamp) * 1000", "refId": "A" }] }
       ]
     }
   cluster.json: |
