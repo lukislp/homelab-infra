@@ -1,3 +1,17 @@
+# global.tolerations covers the USER-deployed components (longhorn-manager DaemonSet, driver
+# deployer, UI). defaultSettings.taintToleration below covers only the SYSTEM-managed ones
+# (instance-manager, CSI plugin, engine-image DaemonSet) - and Longhorn applies that setting
+# only once every volume is detached (longhorn-manager setting_controller.go:
+# "failed to apply ... when there are attached volumes. It will be eventually applied").
+# Without this block a helm upgrade rolled the manager off pinode01 (studylife/relief taint)
+# and it could not come back, which would strand the 29 replicas living there.
+# Rolled out live 2026-09-29 (helm upgrade pinned to chart 1.7.2, all volumes stayed healthy).
+global:
+  tolerations:
+    - key: studylife/relief
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
 # Longhorn: distributed, cross-node-replicated block storage - installed alongside
 # local-path, NOT replacing it. Installed by hand via helm, like Velero/tailscale - NOT
 # Flux-managed (no helm-controller in this cluster by design):
