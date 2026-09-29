@@ -1,4 +1,40 @@
-# CNPG: moving off in-tree Barman Cloud (assessment, not executed)
+# CNPG: moving off in-tree Barman Cloud (assessed 2026-09, executed 2026-09-29)
+
+## Execution record (2026-09-29, both clusters on the plugin)
+
+Done in the order suggested below: plugin v0.15.0 installed (`cluster/12-barman-cloud-plugin.yaml`,
+homelab-infra #113), claude-queue-pg first (claude-queue-platform #134), studylife-pg second
+(studylife #308), monitoring renamed (#114, #115). Both clusters: plugin backup `completed`,
+`ContinuousArchiving` True, `firstRecoverabilityPoint` **unchanged** (2026-09-13T18:52:32Z and
+2026-09-10T03:00:14Z) - the proof that the plugin continued the existing trees. The plugin
+metrics report real values, so `alert-cnpg-backup-stale` exists now.
+
+Two things the assessment did not predict:
+
+1. **Install race.** In the first minute after applying the plugin manifest the operator logs
+   `Secret "barman-cloud-client-tls" not found` (cert-manager issues the certificates a few
+   seconds later) and the plugin logs `Role "<cluster>-barman-cloud" not found` on its first
+   reconcile. A `Backup` created inside that window fails with `requested plugin is not
+   available` and never retries on its own - delete it and create a new one. No operator
+   restart needed.
+2. **`primaryUpdateMethod: switchover` deadlocks the migration on a multi-instance cluster.**
+   The operator restarts the replicas (they come back with the sidecar), then asks the old
+   primary to demote. But the old primary's instance manager already runs the NEW spec: it
+   fails every reconcile with `while getting plugin connection: Unknown plugin` because it has
+   no sidecar yet, and the demotion is part of that reconcile - so the switchover sits in
+   "in progress" forever, and meanwhile the primary archives nothing (`wal archive plugin is
+   not available`). Postgres itself keeps serving; only archiving stops. studylife-pg sat like
+   this for 25 minutes. Way out that keeps the timeline and the archive gap-free: set
+   `primaryUpdateMethod: restart` and cancel the switchover by pointing `status.targetPrimary`
+   back at the current primary (the operator then recreates the primary pod in place; it did
+   still fail over to a replica on pod deletion, but the pending `.ready` segments were archived
+   by the restarted pod and the history/`.partial` files by the new primary, so nothing was
+   lost). Put the method back to `switchover` afterwards. For a future migration of the same
+   kind: switch the method to `restart` BEFORE the plugin change, or do the cluster edit and a
+   `kubectl cnpg restart` in one go. claude-queue-pg (1 instance, restart by nature) never hit it.
+
+The assessment text below is kept as written.
+
 
 Both Postgres clusters back up to Cloudflare R2 through `spec.backup.barmanObjectStore` -
 the Barman Cloud support that is compiled into the CloudNativePG operator itself. That
