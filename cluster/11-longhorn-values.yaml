@@ -80,14 +80,20 @@ defaultSettings:
   # volumes need. Set live first (setting applied=true immediately, pinode02 schedulable again),
   # recorded here so the next helm upgrade does not put 25% back.
   storageMinimalAvailablePercentage: 15
+  # Both set live during the 1.7.2 -> 1.13.0 upgrade chain on 2026-09-30 and recorded here so a
+  # helm upgrade keeps them:
+  # - concurrentAutomaticEngineUpgradePerNodeLimit 1: after every manager upgrade Longhorn
+  #   live-upgrades the volumes' engine binary on its own (default 0 = never; every volume would
+  #   sit on the old engine until someone clicks "Upgrade Engine" per volume). Live upgrade does
+  #   NOT move the engine PROCESS - it stays in the old instance-manager pod until the volume is
+  #   detached once, so old instance managers linger (one per upgraded minor) until a detach.
+  # - guaranteedInstanceManagerCPU 4 (default 12 = 480m per pod on these 4-core Pis): during a
+  #   chain of minor upgrades one instance-manager generation per node accumulates per step, and
+  #   pinode02 ran out of schedulable CPU at the second step (OutOfcpu on the new instance
+  #   manager). 160m is a scheduling reservation only (no CPU limit is set), not a throttle.
+  concurrentAutomaticEngineUpgradePerNodeLimit: 1
+  guaranteedInstanceManagerCPU: 4
   #
-  # guaranteedInstanceManagerCPU left at chart default deliberately - this chart version
-  # (1.7.2) exposes no direct memory/CPU resource-request knobs for longhornManager/
-  # longhornDriver at all (checked via `helm show values`, not assumed), so there's nothing
-  # to conservatively tune down here yet. Revisit if instance-manager gets OOMKilled once
-  # real volumes attach - pinode01/pinode03 are 4GB nodes already running near 50-70% memory
-  # before Longhorn.
-  guaranteedInstanceManagerCPU: ~
   # pinode01 carries studylife/relief=true:NoSchedule on top of the control-plane taint, and
   # Longhorn's own DaemonSets (longhorn-manager, longhorn-csi-plugin, engine-image-*) ship with
   # no tolerations at all. NoSchedule does not evict, so on 2026-09-14 all three were still
