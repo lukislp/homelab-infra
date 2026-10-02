@@ -210,11 +210,19 @@ data:
           # the primary too - see the git history of this comment), so backup success was a manual
           # check. The Barman Cloud Plugin exposes barman_cloud_cloudnative_pg_io_last_available_
           # backup_timestamp on the instance exporter, verified live on claude-queue-pg right
-          # after its migration (real epoch of the on-demand backup, last_failed = 0). Until
-          # studylife-pg is migrated too, the expression falls back to the in-tree metric there
-          # (its primary does report the 03:00 backup correctly today). Per namespace: each
-          # cluster fires on its own. 26h lookback + max_over_time keeps the last success visible
-          # across instance restarts (same reasoning as alert-velero-backup-stale below).
+          # after its migration (real epoch of the on-demand backup, last_failed = 0). Both
+          # clusters run the plugin since 2026-09-29; the in-tree metric stays as a fallback in
+          # case the plugin metric ever disappears. Per namespace: each cluster fires on its own.
+          # 26h lookback + max_over_time keeps the last success visible across instance restarts
+          # (same reasoning as alert-velero-backup-stale below).
+          #
+          # The fallback MUST be applied OUTSIDE the subquery, i.e. max_over_time(A) or
+          # max_over_time(B), never max_over_time((A or B)[...]). Inside the subquery the two
+          # metric names survive as separate series; the moment a single scrape in the 26h window
+          # misses A for one instance (seen 2026-10-02 19:00 during the k3s restart: 358 of 360
+          # samples), B fills that step with the same labels, and max_over_time then drops
+          # __name__ and fails with "vector cannot contain metrics with the same labelset" - for
+          # the next 26 hours. Grafana turns the query error into a firing alert.
           - uid: alert-cnpg-backup-stale
             title: "Postgres base backup overdue (last success more than 26h ago)"
             condition: C
@@ -223,7 +231,7 @@ data:
               - refId: A
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: prometheus
-                model: { refId: A, expr: 'time() - max by (namespace) (max_over_time((barman_cloud_cloudnative_pg_io_last_available_backup_timestamp or cnpg_collector_last_available_backup_timestamp)[26h:1m]))' }
+                model: { refId: A, expr: 'time() - max by (namespace) (max_over_time(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp[26h:1m]) or max_over_time(cnpg_collector_last_available_backup_timestamp[26h:1m]))' }
               - refId: B
                 relativeTimeRange: { from: 300, to: 0 }
                 datasourceUid: "__expr__"
