@@ -1,7 +1,7 @@
 # Applies EXCLUSIVELY the Flux-managed subset of monitoring/ to the cluster - mirrors
-# studylife/k8s/flux/deploy/kustomization.yaml's own scoping decision. These are the only 6
-# files out of this whole repo that get continuously reconciled from Git; everything else here
-# (cluster/, the rest of monitoring/, provisioning/) is applied once via
+# studylife/k8s/flux/deploy/kustomization.yaml's own scoping decision. These 11 files are the
+# only ones out of this whole repo that get continuously reconciled from Git; everything else
+# here (cluster/, monitoring/00 + 03, provisioning/) is applied once via
 # provisioning/bootstrap-cluster.ps1, same as studylife's own k8s/ folder.
 #
 # 11-otel-collector.yaml/12-tempo.yaml joined this list (StudyLife telemetry rollout phase 4):
@@ -9,8 +9,22 @@
 # retention) the same way prometheus-config does below, so they get the same continuous
 # reconciliation instead of requiring a manual bootstrap-cluster.ps1 rerun for every tweak.
 #
+# 02/04/08/09/10 joined on 2026-10-02 after a merged Renovate bump (grafana 13.2.2, a security
+# release) sat unapplied in main for weeks because "merge" and "rollout" were two separate
+# steps for these files. Now a merged image bump IS the rollout, for every workload in the
+# monitoring stack. The two files that stay bootstrap-only do so for RBAC reasons, not by
+# choice: flux/01-reconciler-rbac.yaml (least privilege, deliberately no cluster-admin) has no
+# "namespaces" verb for 00-namespace.yaml, and Kubernetes' RBAC escalation check would reject
+# the kube-state-metrics ClusterRole in 03 because the reconciler holds none of the list/watch
+# rights that role grants (statefulsets, jobs, endpointslices, namespaces). Extending the
+# reconciler role is a one-off manual apply of flux/01-reconciler-rbac.yaml - a follow-up.
+#
+# The PVCs in 04/08/10 carry "kustomize.toolkit.fluxcd.io/prune: disabled": prune: true on the
+# Kustomization would otherwise delete the volume (and the Grafana/Loki/Uptime Kuma state on
+# it) the moment a file is removed from this list.
+#
 # No patches needed here (unlike studylife's own deploy/kustomization.yaml, which forces
-# imagePullPolicy: Always on the app Deployments) - none of these 6 objects have a
+# imagePullPolicy: Always on the app Deployments) - none of these objects have a
 # git-committed placeholder that needs overriding at apply time.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -21,6 +35,13 @@ resources:
   # required (deliberately not automated, to avoid losing Prometheus' in-memory state on every
   # dashboard update) - same caveat as studylife's own deploy/kustomization.yaml.
   - ../../monitoring/01-prometheus.yaml
+  # node-exporter DaemonSet (hostNetwork/hostPID/hostPath, PSS baseline is warn/audit only in
+  # this namespace precisely because of it) - image bumps only, the spec is stable.
+  - ../../monitoring/02-node-exporter.yaml
+  # Grafana itself (Deployment/PVC/Service/Certificate/datasource ConfigMap). Recreate strategy,
+  # single replica: a bump means ~1 minute of Grafana downtime while the new image is pulled,
+  # measured 2026-10-02 for 13.2.1 -> 13.2.3. Dashboards/alerting live in 05/06/07 below.
+  - ../../monitoring/04-grafana.yaml
   # Grafana dashboard contents (no placeholders, see their file header) - so "tested once,
   # automatically to prod" also applies to dashboard changes, not just image tags.
   - ../../monitoring/05-grafana-dashboards.yaml
@@ -30,6 +51,16 @@ resources:
   # Alert rules + notification policy (no placeholders) - the Telegram contact point itself is
   # deliberately NOT managed here (manual UI setup, see file header).
   - ../../monitoring/07-grafana-alerting.yaml
+  # Loki + Promtail - same "config-file-only, read at startup" caveat as Prometheus above: a
+  # loki-config/promtail-config ConfigMap change also needs "kubectl -n monitoring rollout
+  # restart deployment/loki" resp. "daemonset/promtail". Being listed here also means Loki is no
+  # longer optional on this cluster: bootstrap-cluster.ps1's -WithLoki switch only matters for
+  # the one-off bootstrap before Flux takes over.
+  - ../../monitoring/08-loki.yaml
+  - ../../monitoring/09-promtail.yaml
+  # Uptime Kuma (Deployment/PVC/Service/Certificate) - monitors and history live in kuma.db on
+  # the PVC, nothing in git to re-provision, hence the prune guard on the volume.
+  - ../../monitoring/10-uptime-kuma.yaml
   # OpenTelemetry collector config (OTLP traces fan-out to Tempo) - same "config-file-only,
   # read at startup" caveat as Prometheus above: a plain ConfigMap apply is not enough, also run
   # "kubectl -n monitoring rollout restart deployment/otel-collector" after a config change.

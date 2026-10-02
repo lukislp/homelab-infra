@@ -1,6 +1,8 @@
 # Host-level CPU/memory/disk/network per node - basis for the cluster overview dashboard.
 # DaemonSet (one pod PER node, automatic), hostNetwork/hostPID needed so the container sees
 # the actual host instead of its own cgroup.
+# Flux-managed since 2026-10-02 (flux/infra-deploy/kustomization.yaml): image bumps roll out on
+# merge.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:

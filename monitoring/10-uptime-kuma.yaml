@@ -1,3 +1,7 @@
+# Flux-managed since 2026-10-02 (flux/infra-deploy/kustomization.yaml): image bumps roll out on
+# merge, nothing to apply by hand after a Renovate PR. Everything that matters (monitors,
+# history, notification settings) lives in kuma.db on the PVC below, which is prune-guarded.
+#
 # Moved here from studylife/k8s/09-uptime-kuma.yaml as part of the cluster-wide-infra split -
 # Uptime Kuma monitors HTTP/TCP endpoints across the WHOLE cluster (studylife-web, grafana,
 # piwatch, other apps' hostnames - see each app's own monitor config in its UI), not just
@@ -35,6 +39,10 @@ kind: PersistentVolumeClaim
 metadata:
   name: uptime-kuma-data
   namespace: monitoring
+  annotations:
+    # Never pruned by Flux, even if this file ever leaves flux/infra-deploy/kustomization.yaml -
+    # the volume holds state that no re-apply can bring back.
+    kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
   accessModes: ["ReadWriteOnce"]
   # Longhorn (cross-node-replicated, cluster/11-longhorn-values.yaml) instead of local-path -

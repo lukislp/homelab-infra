@@ -19,9 +19,11 @@ Prometheus, and Flux's reconciler RBAC.
   Disruption Budgets for cluster-wide components (CoreDNS, NGINX Gateway Fabric). **Not**
   Flux-managed — applied once via the provisioning script or by hand.
 - **`monitoring/`** — the whole Prometheus/Grafana/Loki/Promtail/node-exporter/kube-state-metrics/
-  otel-collector/Tempo stack, shared by every app above. `01-prometheus.yaml`, the 3 grafana
-  files (`05`/`06`/`07`), and `11-otel-collector.yaml`/`12-tempo.yaml` **are** Flux-managed (see
-  `flux/infra-deploy/`); everything else here is applied once.
+  otel-collector/Tempo/Uptime Kuma stack, shared by every app above. Every workload in it
+  **is** Flux-managed (see `flux/infra-deploy/` for the list and the reasoning) - a merged image
+  bump is the rollout. Only `00-namespace.yaml` and `03-kube-state-metrics.yaml` are applied
+  once, because the least-privilege reconciler role in `flux/` cannot apply a Namespace or the
+  kube-state-metrics ClusterRole.
 - **`flux/`** — Flux's own install manifest and the single shared reconciler RBAC
   (`flux-studylife-reconciler` ClusterRole/Binding) used by every app's Kustomization regardless
   of which repo it's defined in. **Each app's own `GitRepository`/`ImageRepository`/

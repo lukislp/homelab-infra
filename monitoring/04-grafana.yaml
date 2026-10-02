@@ -7,15 +7,15 @@
 # hostnames now live in cluster/02-gateway.yaml as an HTTPRoute. This file no longer contains an
 # Ingress, no "example.invalid" string, and no placeholder of any kind - bootstrap-cluster.ps1
 # still documents -GrafanaHost as a parameter but no longer substitutes anything into it.
-# A plain "kubectl apply -f monitoring/04-grafana.yaml" is safe again. Run "kubectl diff -f"
-# first anyway, the way every manual apply in this repo should.
+# Since 2026-10-02 this file is Flux-managed (flux/infra-deploy/kustomization.yaml): a merged
+# image bump is the rollout, no "kubectl apply -f" after merging any more. The one-off bootstrap
+# via provisioning/bootstrap-cluster.ps1 still applies it before Flux exists.
 #
 # Self-hosted Grafana instead of Grafana Cloud (no external account needed). Provisioning via
 # ConfigMap (Grafana automatically reads /etc/grafana/provisioning/{datasources,dashboards} on
 # startup) - the datasource is thus available immediately, without manual clicking. The
-# dashboard contents themselves deliberately live in the SEPARATE k8s/17b-grafana-dashboards.yaml
-# (see the comment there) - this file now contains only infrastructure (including the ingress
-# host placeholders that bootstrap-cluster.ps1 resolves).
+# dashboard contents themselves deliberately live in the SEPARATE 05-grafana-dashboards.yaml
+# (see the comment there) - this file contains only infrastructure.
 #
 # Backend TLS for the ingress-nginx -> Grafana hop: leaf certificate from the same
 # cluster-internal CA as the external ingress certificate (k8s/07b-cert-manager-issuers.yaml).
@@ -110,6 +110,10 @@ kind: PersistentVolumeClaim
 metadata:
   name: grafana-data
   namespace: monitoring
+  annotations:
+    # Never pruned by Flux, even if this file ever leaves flux/infra-deploy/kustomization.yaml -
+    # the volume holds state that no re-apply can bring back.
+    kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
   accessModes: ["ReadWriteOnce"]
   # Longhorn (cross-node-replicated, cluster/11-longhorn-values.yaml) instead of local-path -

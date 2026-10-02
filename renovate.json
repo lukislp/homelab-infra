@@ -33,8 +33,8 @@
   ],
   "minimumReleaseAge": "3 days",
   "prBodyNotes": [
-    "**Merging is not the rollout.** Only the six files listed in `flux/infra-deploy/kustomization.yaml` are continuously reconciled by Flux (`monitoring/01-prometheus.yaml`, `05`, `06`, `07`, `11-otel-collector.yaml`, `12-tempo.yaml`). Everything else in `monitoring/`, `cluster/` and `flux/` is applied by hand after merge - normally `kubectl apply -f <the one changed file>`, or a `provisioning/bootstrap-cluster.ps1` run.",
-    "Every one of those hand-applied files takes a plain `kubectl apply -f <file>`; the header of `monitoring/04-grafana.yaml` used to warn otherwise, but the placeholder Ingress it referred to is long gone (routing lives in `cluster/02-gateway.yaml` now). Run `kubectl diff -f` before any apply regardless - that, not a comment, is what proves the change is the only change.",
+    "**For `monitoring/` merging IS the rollout** (except `00-namespace.yaml` and `03-kube-state-metrics.yaml`): every workload file is listed in `flux/infra-deploy/kustomization.yaml` and reconciled by Flux within five minutes of the merge, with a health check on the new pods. Check `kubectl -n flux-system get kustomization infra-deploy` afterwards.",
+    "Everything in `cluster/` and `flux/`, plus the two monitoring files above, is still applied by hand after merge - a plain `kubectl apply -f <the one changed file>`, or a `provisioning/bootstrap-cluster.ps1` run. Run `kubectl diff -f` before any manual apply - that, not a comment, is what proves the change is the only change.",
     "Prometheus, the otel-collector and Tempo read their config file only at startup, so a config change additionally needs a `kubectl -n monitoring rollout restart deployment/<name>`.",
     "Grafana, Prometheus, Loki, Tempo and Uptime Kuma each hold persistent state on a PVC. Before merging a version bump, confirm from the upstream upgrade notes that the new version reads the existing on-disk format - and, for a major, that a downgrade is still possible at all."
   ],

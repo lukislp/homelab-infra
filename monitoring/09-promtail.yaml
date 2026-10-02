@@ -1,6 +1,10 @@
 # Reads container logs per node (/var/log/pods hostPath) and ships them with Kubernetes
 # metadata (namespace/pod/container labels) to Loki - DaemonSet, one pod per node, automatic.
 #
+# Flux-managed since 2026-10-02 (flux/infra-deploy/kustomization.yaml): image bumps roll out on
+# merge. Promtail reads its config only at startup, so a ConfigMap change here additionally
+# needs "kubectl -n monitoring rollout restart daemonset/promtail".
+#
 # INCIDENT: this file (and k8s/18-loki.yaml) existed in git for a while but was never
 # successfully deployed. First real deploy attempt found two separate root causes:
 #

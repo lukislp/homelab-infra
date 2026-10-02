@@ -1,7 +1,8 @@
 # Applies EXCLUSIVELY flux/infra-deploy/ (see there) to the cluster - same scoping decision as
 # studylife's own k8s/flux/05-kustomization.yaml. prune: true is unproblematic here, since the
-# scope of effect is limited exactly to Prometheus + the 3 Grafana dashboard/alerting objects
-# (Flux's inventory tracking only concerns what THIS Kustomization itself has applied).
+# scope of effect is limited exactly to the monitoring workloads listed there (Flux's inventory
+# tracking only concerns what THIS Kustomization itself has applied), and the three PVCs among
+# them carry the prune: disabled annotation so a list change can never take a volume with it.
 #
 # Adopts objects previously owned by studylife-deploy (see studylife/k8s/flux/deploy/
 # kustomization.yaml) - this Kustomization must reach Ready here FIRST, before the same 4
@@ -20,4 +21,8 @@ spec:
   path: ./flux/infra-deploy
   prune: true
   wait: true
-  timeout: 3m
+  # 5m, not 3m: since 2026-10-02 this also health-checks the Recreate-strategy Grafana/Loki/
+  # Uptime Kuma Deployments, whose image pull on a Pi over a cold cache alone can take a minute
+  # or two; a timeout only flips the Kustomization to not-ready until the next reconcile, the
+  # rollout itself keeps going.
+  timeout: 5m
