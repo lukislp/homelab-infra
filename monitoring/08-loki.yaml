@@ -2,6 +2,10 @@
 # filesystem storage with limited retention (7 days, analogous to Prometheus' retention).
 # Complements the metrics from Prometheus/Grafana with searchable logs, without dedicated
 # app-level tracing in the .NET code (deliberately excluded).
+#
+# Flux-managed since 2026-10-02 (flux/infra-deploy/kustomization.yaml): image bumps roll out on
+# merge. Loki reads loki.yaml only at startup, so a ConfigMap change here additionally needs
+# "kubectl -n monitoring rollout restart deployment/loki" - same caveat as Prometheus.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -40,6 +44,10 @@ kind: PersistentVolumeClaim
 metadata:
   name: loki-data
   namespace: monitoring
+  annotations:
+    # Never pruned by Flux, even if this file ever leaves flux/infra-deploy/kustomization.yaml -
+    # the volume holds state that no re-apply can bring back.
+    kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
   accessModes: ["ReadWriteOnce"]
   # Longhorn (cross-node-replicated, cluster/11-longhorn-values.yaml) instead of local-path -
