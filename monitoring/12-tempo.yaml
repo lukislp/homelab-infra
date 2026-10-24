@@ -148,7 +148,7 @@ spec:
             # that protection would have to be re-derived from scratch.
             # Revisit only if Tempo ever ships a broker-less mode, or if this cluster grows a Kafka-class
             # component for some other reason and it stops being a dedicated cost.
-          image: grafana/tempo:2.10.9@sha256:cb1fb66cd6ac32ae189b88c5b8544d2f425d968671ce7d727fbea856cd103aa9
+          image: grafana/tempo:2.10.10@sha256:12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38
           args: ["-config.file=/etc/tempo/tempo.yaml"]
           ports:
             - { name: otlp-grpc, containerPort: 4317 }
