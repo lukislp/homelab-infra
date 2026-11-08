@@ -545,7 +545,7 @@ spec:
           # and no range selector is shorter than [1m], so left-open ranges still leave rate()
           # two samples at the 30s scrape interval. What the upgrade does cost is head memory
           # during the changeover - see the resources block below.
-          image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+          image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
           args:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
