@@ -35,7 +35,6 @@ permission on the `namespaces` resource at all, so those files are bootstrap-onl
 
 | Namespace | enforce | Why not stricter |
 | --- | --- | --- |
-| `claude-queue` | `restricted` | — |
 | `github-dashboard` | `restricted` | — |
 | `homelab-hub` | `restricted` | — |
 | `studylife-alexa` | `restricted` | — |
@@ -45,10 +44,9 @@ permission on the `namespaces` resource at all, so those files are bootstrap-onl
 | `homelab-autodoc` | `baseline` | `autodoc-server` runs as uid 0 with unrestricted capabilities and no seccomp profile |
 | `studylife-ai` | `baseline` | the `qdrant` image runs as root (`runAsUser=0`, `allowPrivilegeEscalation != false`) |
 | `studylife-scale` | `baseline` | the 6 `redis-cluster` pods run as root with unrestricted capabilities |
-| `unifiprotectdashboard` | `baseline` | the app pod runs as uid 0 with unrestricted capabilities |
 
-All of them additionally carry `warn: restricted` + `audit: restricted`, so the four on
-`baseline` keep reporting exactly what still stands between them and `restricted` — those four
+All of them additionally carry `warn: restricted` + `audit: restricted`, so the three on
+`baseline` keep reporting exactly what still stands between them and `restricted` — those three
 are the open hardening backlog.
 
 ### Namespaces with no manifest in any repo (labelled by hand)
@@ -108,7 +106,6 @@ State after the 2026-09-13 round:
 | `kube-system/coredns` | `minAvailable: 1`, allowed 0 | `maxUnavailable: 1`, allowed 1 | `cluster/04-pod-disruption-budgets.yaml` |
 | `nginx-gateway/nginx-gateway` | `minAvailable: 1`, allowed 0 | `maxUnavailable: 1`, allowed 1 | `cluster/04-pod-disruption-budgets.yaml` |
 | `studylife-scale/studylife-pg-pooler` | `minAvailable: 1` of 1, allowed 0 | `minAvailable: 1` of 2, allowed 1 | studylife repo, `k8s/11-pooler.yaml` → `instances: 2` |
-| `claude-queue/claude-queue-pg-primary` | CNPG-managed, allowed 0 | PDB no longer created | claude-queue-platform repo, `k8s/02-postgres.yaml` → `enablePDB: false` |
 | `studylife-scale/studylife-pg-primary` | CNPG-managed, allowed 0 | **unchanged, by design** | see below |
 | `longhorn-system/instance-manager-*` | Longhorn-managed, allowed 0 | **unchanged, by design** | Longhorn releases these itself once the node's volumes are detached / rebuilt elsewhere |
 
@@ -137,7 +134,8 @@ drain, at 1 replica it lets the drain through.
 For a CNPG `Cluster` with `instances: 1`, the operator still creates a `<cluster>-primary` PDB
 with `minAvailable: 1`, which can never allow a disruption. CNPG's own documented answer for
 single-instance clusters is `.spec.enablePDB: false` — there is no HA to protect anyway, the
-single instance is simply restarted wherever it lands. Applied to `claude-queue-pg`.
+single instance is simply restarted wherever it lands. First applied to `claude-queue-pg`, which was removed from the
+cluster on 2026-11-11.
 
 ### CNPG multi-instance clusters: the primary PDB is supposed to block
 

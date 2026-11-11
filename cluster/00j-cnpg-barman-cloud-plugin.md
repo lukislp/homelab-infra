@@ -1,5 +1,11 @@
 # CNPG: moving off in-tree Barman Cloud (assessed 2026-09, executed 2026-09-29)
 
+> **Update 2026-11-11:** `claude-queue-pg` (and its whole namespace) was removed from the
+> cluster; `studylife-pg` is the only CNPG cluster left. Everything below that mentions
+> `claude-queue-pg` is the dated record of the 2026-09 migration, where it served as the canary.
+> The procedure itself applies unchanged to `studylife-pg`. The old barman tree under
+> `s3://studylifebackup/claude-queue` was left in R2 and is no longer covered by a retention policy.
+
 ## Execution record (2026-09-29, both clusters on the plugin)
 
 Done in the order suggested below: plugin v0.15.0 installed (`cluster/12-barman-cloud-plugin.yaml`,

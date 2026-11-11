@@ -59,8 +59,6 @@ Volumes join the nightly 03:00 run (TTL 72h) via pod annotation
 | qdrant (studylife-ai) | storage | crash-consistent; embeddings re-derivable at worst |
 | studylife-ai | data | agent checkpoints; crash-consistent, accepted |
 | studylife-mcp | data | oauth.db (MCP client registrations/tokens) |
-| unifiprotectdashboard | data | dashboard.db + enc.key + vapid-keys.json (irreplaceable) |
-| claude-queue-pg (claude-queue) | pgdata | crash-consistent; queue state, rebuildable |
 | studylife-alexa | data | per-user encrypted StudyLife API keys (account links) |
 | studylife-developers | data | KeyStore - every registered OAuth client (irreplaceable) |
 | studylife-webhooks | data | webhook registrations (target_url/events/secret) |
@@ -85,7 +83,7 @@ hostPath volumes at all; trend data, accepted, would need a move to a PVC to cha
 
 Hard-learned rule: an opt-in annotation only works if the pod's NAMESPACE is in the
 nightly-pvc schedule's includedNamespaces list - the first rollout of studylife-mcp and
-unifiprotectdashboard shipped annotations without the namespaces, and nothing happened,
+two since-removed apps shipped annotations without the namespaces, and nothing happened,
 silently. When a new app opts in, extend the schedule list in the same change.
 
 Coverage was completed 2026-09-13: studylife-alexa, studylife-developers,

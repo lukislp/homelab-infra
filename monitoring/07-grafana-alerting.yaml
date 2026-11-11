@@ -209,8 +209,8 @@ data:
           # timestamp was unusable for an alert (stuck at 0 on replicas, and for a long time on
           # the primary too - see the git history of this comment), so backup success was a manual
           # check. The Barman Cloud Plugin exposes barman_cloud_cloudnative_pg_io_last_available_
-          # backup_timestamp on the instance exporter, verified live on claude-queue-pg right
-          # after its migration (real epoch of the on-demand backup, last_failed = 0). Both
+          # backup_timestamp on the instance exporter, verified live on claude-queue-pg (since removed
+          # from the cluster, 2026-11-11) right after its migration (real epoch of the on-demand backup, last_failed = 0). Both
           # clusters run the plugin since 2026-09-29; the in-tree metric stays as a fallback in
           # case the plugin metric ever disappears. Per namespace: each cluster fires on its own.
           # 26h lookback + max_over_time keeps the last success visible across instance restarts
@@ -241,7 +241,7 @@ data:
                 datasourceUid: "__expr__"
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [93600] } }] }
             labels: { severity: warning }
-            annotations: { summary: "The daily base backup of a Postgres cluster (studylife-pg 03:00, claude-queue-pg 02:00, both to R2) has not succeeded for more than 26 hours - point-in-time recovery would have to replay from an ageing base." }
+            annotations: { summary: "The daily base backup of a Postgres cluster (studylife-pg, 03:00, to R2) has not succeeded for more than 26 hours - point-in-time recovery would have to replay from an ageing base." }
           - uid: alert-cnpg-replication-lag
             title: "Postgres replication lag too high"
             condition: C
