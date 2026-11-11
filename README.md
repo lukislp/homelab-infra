@@ -5,7 +5,7 @@
 
 Cluster-wide Kubernetes infrastructure for the k3s homelab that [studylife](https://github.com/lukislp/studylife),
 [studylife-ai](https://github.com/lukislp/studylife-ai), [studylife-mcp](https://github.com/lukislp/studylife-mcp),
-[piwatch](https://github.com/lukislp/piwatch), and [UnifiProtectDashboard](https://github.com/lukislp/UnifiProtectDashboard)
+and [piwatch](https://github.com/lukislp/piwatch)
 all run on. Split out of studylife's own `k8s/` folder, which had organically become the de
 facto home for this shared infra alongside studylife's own app manifests — every other app repo
 already followed a "small, genuinely app-scoped `k8s/`/`deploy/` folder, no infra of its own"
