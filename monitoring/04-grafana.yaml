@@ -173,7 +173,7 @@ spec:
           # formats are unaffected: datasources, dashboard provider and alerting are all
           # apiVersion 1, which 13 still reads, and only core datasources (prometheus/loki/tempo)
           # are in use, no plugins to go stale.
-          image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
+          image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
           env:
             # GF_SERVER_* is Grafana's standard way to set any grafana.ini setting via an env
             # var (GF_<SECTION>_<KEY>) - no separate grafana.ini ConfigMap mount needed.
