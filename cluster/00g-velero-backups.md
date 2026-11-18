@@ -1,6 +1,7 @@
 # Velero: nightly application PVC backups to R2
 
-Postgres already has offsite backups (CNPG barman -> R2, 7d retention). Everything else
+Postgres already has offsite backups (CNPG barman plugin -> R2, 30d retention, see
+`00j-cnpg-barman-cloud-plugin.md`). Everything else
 worth keeping lived only on local-path PVs on the Pis: uptime-kuma's manually configured
 monitors, grafana's manually configured Telegram contact point, autodoc's changelog/drift
 history + admin config, homelab-hub's link data, qdrant's embeddings. A node SSD failure
@@ -125,3 +126,64 @@ manual runs, wait for the rollout to settle first.
 Prometheus scrapes the velero server (job `velero`, monitoring/01-prometheus.yaml);
 `07-grafana-alerting.yaml` fires when the last successful `velero-nightly-pvc` backup is
 older than 26h - same staleness pattern as the autodoc collector rule.
+
+A second rule, `alert-velero-deletion-failing`, fires when expired backups cannot be
+deleted (`velero_backup_deletion_failure_total` grows). "Backup too old" alone is not
+enough: retention is a promise too, and a failing deletion leaves data in R2 far past the
+72h TTL without any other signal (see the next section).
+
+## Retention: verify it, do not assume it
+
+The TTL is only the intent. What actually leaves R2 is decided by the deletion run, so
+check it after any Velero or kopia change, and whenever a privacy statement quotes the
+number.
+
+```bash
+# Every backup should be Completed and younger than TTL + 1 day. Anything in "Deleting"
+# with an expiration in the past is a retention failure, not a cosmetic state.
+kubectl -n velero get backups.velero.io \
+  -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,EXP:.status.expiration
+# Why a deletion failed (the controller re-creates the request about once an hour):
+kubectl -n velero get deletebackuprequests.velero.io \
+  -o custom-columns=BACKUP:.spec.backupName,PHASE:.status.phase,ERR:.status.errors
+```
+
+Velero deletes in a fixed order: PV snapshots, then the pod volume (kopia) snapshots, then
+the backup's own files under `velero/backups/<name>/` in the bucket. If the kopia step reports
+an error, the log says `Skipping removal of backup from backup storage due to previous
+errors` and **nothing** of that backup is removed from R2. The Backup object then stays in
+`Deleting` with no finalizer and no deletionTimestamp; removing finalizers does not help,
+and deleting the Backup object by hand does not help either (the backup sync controller
+re-creates it from the files still in the bucket).
+
+Incident 2026-10-14 to 2026-11-18 (found 2026-11-18): every expired `velero-nightly-pvc`
+backup since 2026-10-11 (and `grafana-pre-13-20260916094004`) stayed in R2. Each deletion
+request failed for all 15 pod volume snapshots with `unable to load manifest contents ...
+BLOB not found` for kopia manifest blobs (`q...`). Backups of `velero-cluster-state`
+(resources only, no kopia data) expired normally. At the same time the hourly
+`*-kopia-maintain-job` runs, which open the repositories fresh, all succeed. The velero
+server pod had been running since 2026-10-02. Working hypothesis (not proven): the
+long-running server holds a stale kopia index/manifest cache after the maintenance jobs
+compacted the manifest blobs, so it looks for blobs that no longer exist. Fix procedure:
+
+1. `kubectl -n velero rollout restart deploy/velero` (drops the server's kopia cache; the
+   schedules and the BSL are untouched). Wait for `1/1 Running`.
+2. Wait for the next garbage-collection pass (about one hour), or trigger it at once with
+   `velero backup delete <name> --confirm` for the oldest stuck backup.
+3. Re-run the two commands above. Success: the stuck backups disappear and new
+   DeleteBackupRequests carry no errors.
+4. If the errors persist after the restart, the manifest blobs are really gone from the
+   bucket. Then stop and plan a repository reset (new kopia repositories for the affected
+   namespaces, then remove the old `velero/kopia/<namespace>/` and
+   `velero/backups/<name>/` prefixes in R2), because an R2 lifecycle rule on a kopia
+   prefix corrupts the live repository.
+
+CNPG has a related, harmless leftover: the 23 `backups.postgresql.cnpg.io` objects of
+September 2026 with `method: barmanObjectStore` were made before the plugin migration. The
+plugin only cleans up Backup objects it owns (log line `Deleting backup not in the
+catalog`), so these 23 stay as Kubernetes objects although their data is gone from the
+bucket (the ObjectStore status `firstRecoverabilityPoint` moves forward every day and
+matches the oldest plugin backup). Deleting such a CNPG Backup object never touches the
+bucket. The same applies to the Cluster's own `status.firstRecoverabilityPoint` /
+`lastSuccessfulBackup` (2026-09): stale in-tree fields; the live values are in
+`kubectl -n studylife-scale get objectstores.barmancloud.cnpg.io r2-studylife -o yaml`.
