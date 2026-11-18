@@ -641,3 +641,30 @@ data:
                 model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [93600] } }] }
             labels: { severity: warning }
             annotations: { summary: "The nightly Velero backup of the app PVCs (03:00 to R2) has not succeeded for more than 26 hours - uptime-kuma/grafana/autodoc/homelab-hub/qdrant data have no current offsite copy." }
+          # Retention side of the same backups: an expired backup whose deletion fails stays
+          # in R2 indefinitely (phase Deleting) and nothing else reports it. Found 2026-11-18
+          # after five weeks of silent failures (kopia "BLOB not found", see
+          # cluster/00g-velero-backups.md "Retention: verify it, do not assume it"). Velero's
+          # garbage collector retries every expired backup about once an hour, so a persistent
+          # failure adds to the counter every hour; increase() survives the counter reset of a
+          # restart. "or vector(0)" keeps a missing series (no failure since the last restart)
+          # at 0 instead of NoData.
+          - uid: alert-velero-deletion-failing
+            title: "Velero cannot delete expired backups (retention not enforced)"
+            condition: C
+            for: 2h
+            data:
+              - refId: A
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: prometheus
+                model: { refId: A, expr: 'sum(increase(velero_backup_deletion_failure_total[2h])) or vector(0)' }
+              - refId: B
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: B, type: reduce, expression: A, reducer: last }
+              - refId: C
+                relativeTimeRange: { from: 300, to: 0 }
+                datasourceUid: "__expr__"
+                model: { refId: C, type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [0] } }] }
+            labels: { severity: warning }
+            annotations: { summary: "Velero failed to delete at least one expired backup in the last 2 hours - its data stays in R2 past the 72h TTL. Check kubectl -n velero get deletebackuprequests.velero.io (cluster/00g-velero-backups.md, section Retention)." }
