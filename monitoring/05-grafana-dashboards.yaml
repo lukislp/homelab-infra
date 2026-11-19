@@ -895,7 +895,7 @@ data:
     }
 ---
 # Separate ConfigMap (own folder, see the provider entry above) - studylife-ai's own metrics
-# (llm/metrics.py: cost/latency/tokens per call_site+model+user_id, plus the FastAPI HTTP
+# (llm/metrics.py: cost/latency/tokens per call_site+model, aggregate with no user label, plus the FastAPI HTTP
 # auto-instrumentation) need the "job=studylife-ai" scrape job in k8s/14-prometheus.yaml to
 # exist first, added in the same commit as this file. Metric/label names were verified
 # locally against a running instance's real /metrics output before writing these queries
@@ -914,7 +914,7 @@ data:
       "uid": "studylife-ai-overview",
       "schemaVersion": 39,
       "time": { "from": "now-6h", "to": "now" },
-      "description": "Kosten, Latenz und Volumen jedes LLM-Calls (RAG-Chat, Agent, Reranking, Retrieval, Ingestion, Eval) - aufschlüsselbar nach Nutzer, Aufrufstelle (call_site) und Modell. Quelle: llm/metrics.py (Prometheus-Metriken neben den strukturierten Logzeilen in llm/logging.py) plus HTTP-Auto-Instrumentierung.",
+      "description": "Kosten, Latenz und Volumen jedes LLM-Calls (RAG-Chat, Agent, Reranking, Retrieval, Ingestion, Eval) - aufschlüsselbar nach Aufrufstelle (call_site) und Modell (aggregiert, kein Nutzer-Label). Quelle: llm/metrics.py (Prometheus-Metriken neben den strukturierten Logzeilen in llm/logging.py) plus HTTP-Auto-Instrumentierung.",
       "panels": [
         { "id": 1, "title": "Service erreichbar", "type": "stat", "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
           "description": "Anzahl bereiter studylife-ai-Pods, von Prometheus selbst über den Scrape-Erfolg gemessen (up-Metrik) - 0 heißt der Service antwortet nicht auf /metrics.",
@@ -937,10 +937,10 @@ data:
         { "id": 6, "title": "HTTP-Latenz p95 nach Endpoint", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
           "fieldConfig": { "defaults": { "unit": "s" } },
           "targets": [{ "expr": "histogram_quantile(0.95, sum by (handler, le) (rate(http_request_duration_seconds_bucket{job=\"studylife-ai\"}[5m])))", "legendFormat": "{{handler}}", "refId": "A" }] },
-        { "id": 7, "title": "Kosten nach Nutzer (pro Stunde)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
-          "description": "sum by (user_id) - beantwortet direkt \"wer hat wie viel verursacht\". user_id ist StudyLifes interne numerische Auth-User-Id (kein Klarname, s. docs/decisions.md \"Metrics dashboard\" im studylife-ai-Repo) - bei Bedarf per Grafana Value Mapping lesbar machen.",
+        { "id": 7, "title": "Kosten nach Aufrufstelle und Modell (pro Stunde)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "description": "sum by (call_site, model) - die LLM-Metriken sind aggregiert und tragen kein Nutzer-Label (DSGVO), es gibt keine Aufschlüsselung pro Nutzer.",
           "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
-          "targets": [{ "expr": "sum by (user_id) (increase(studylife_ai_llm_cost_usd_total[1h]))", "legendFormat": "user {{user_id}}", "refId": "A" }] },
+          "targets": [{ "expr": "sum by (call_site, model) (increase(studylife_ai_llm_cost_usd_total[1h]))", "legendFormat": "{{call_site}} / {{model}}", "refId": "A" }] },
         { "id": 8, "title": "Kosten nach Aufrufstelle (call_site)", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
           "description": "chat, agent, rerank, retrieval, ingestion, eval, eval-fixture, eval-judge.",
           "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
@@ -965,17 +965,17 @@ data:
             { "expr": "sum(rate(studylife_ai_llm_prompt_tokens_total[5m]))", "legendFormat": "prompt", "refId": "A" },
             { "expr": "sum(rate(studylife_ai_llm_completion_tokens_total[5m]))", "legendFormat": "completion", "refId": "B" }
           ] },
-        { "id": 14, "title": "Top-Nutzer nach Call-Volumen (24h)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
-          "targets": [{ "expr": "topk(10, sum by (user_id) (increase(studylife_ai_llm_calls_total[24h])))", "format": "table", "instant": true, "refId": "A" }] },
+        { "id": 14, "title": "Top-Aufrufstellen nach Call-Volumen (24h)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
+          "targets": [{ "expr": "topk(10, sum by (call_site, model) (increase(studylife_ai_llm_calls_total[24h])))", "format": "table", "instant": true, "refId": "A" }] },
         { "id": 15, "title": "Fehlgeschlagene Calls nach Aufrufstelle/Modell", "type": "timeseries", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 46 },
           "description": "Nur status=\"failure\" - ein Anstieg zeigt, wo/wodurch gerade LLM-Aufrufe scheitern (Timeout, Rate-Limit, ...).",
           "targets": [{ "expr": "sum by (call_site, model) (rate(studylife_ai_llm_calls_total{status=\"failure\"}[5m]))", "legendFormat": "{{call_site}} / {{model}}", "refId": "A" }] },
-        { "id": 16, "title": "Gesamtkosten pro Nutzer (30 Tage)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 54 },
-          "description": "Rollierende 30-Tage-Summe pro User - Obergrenze ist die Prometheus-Retention (k8s/14-prometheus.yaml), keine unbegrenzte 'seit Projektstart'-Summe. Dafür bräuchte es einen separaten persistenten Cost-Ledger (noch nicht gebaut, s. docs/decisions.md im studylife-ai-Repo).",
+        { "id": 16, "title": "Gesamtkosten pro Aufrufstelle und Modell (30 Tage)", "type": "table", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 54 },
+          "description": "Rollierende 30-Tage-Summe pro Aufrufstelle/Modell -Obergrenze ist die Prometheus-Retention (k8s/14-prometheus.yaml), keine unbegrenzte 'seit Projektstart'-Summe. Dafür bräuchte es einen separaten persistenten Cost-Ledger (noch nicht gebaut, s. docs/decisions.md im studylife-ai-Repo).",
           "fieldConfig": { "defaults": {}, "overrides": [
             { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "unit", "value": "currencyUSD" } ] }
           ] },
-          "targets": [{ "expr": "sort_desc(sum by (user_id) (increase(studylife_ai_llm_cost_usd_total[30d])))", "format": "table", "instant": true, "refId": "A" }] }
+          "targets": [{ "expr": "sort_desc(sum by (call_site, model) (increase(studylife_ai_llm_cost_usd_total[30d])))", "format": "table", "instant": true, "refId": "A" }] }
       ]
     }
 ---
