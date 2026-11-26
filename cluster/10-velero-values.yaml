@@ -46,7 +46,7 @@ initContainers:
   # Note "backups.velero.io", not "backup" - the short name resolves to Longhorn's CRD here.
   # Phase Failed means roll back: tag back to v1.14.0, helm upgrade again, re-pin.
   - name: velero-plugin-for-aws
-    image: velero/velero-plugin-for-aws:v1.14.4 # arm64 verified via docker manifest inspect; see note above
+    image: velero/velero-plugin-for-aws:v1.15.0 # arm64 verified via docker manifest inspect; see note above
     volumeMounts:
       - name: plugins
         mountPath: /target
